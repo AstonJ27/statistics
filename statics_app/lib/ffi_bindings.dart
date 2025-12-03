@@ -65,6 +65,8 @@ FreeDart? _lookupFree() {
 }
 final FreeDart? freeCStringNative = _lookupFree();
 
+
+// --- Simulacion --
 // Agrega los typedefs para la nueva función
 typedef SimulateCarwashNative = Pointer<Utf8> Function(Int32, Double);
 typedef SimulateCarwashDart = Pointer<Utf8> Function(int, double);
@@ -78,3 +80,16 @@ SimulateCarwashDart? _lookupSimulateCarwash() {
   }
 }
 final SimulateCarwashDart? simulateCarwashNative = _lookupSimulateCarwash();
+
+// Native: char* simulate_carwash_dynamic(char* json_config)
+typedef SimDynamicNative = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef SimDynamicDart = Pointer<Utf8> Function(Pointer<Utf8>);
+
+SimDynamicDart? _lookupSimDynamic() {
+  try {
+    return nativeLib.lookupFunction<SimDynamicNative, SimDynamicDart>('simulate_carwash_dynamic');
+  } catch (_) {
+    return null;
+  }
+}
+final SimDynamicDart? simulateDynamicNative = _lookupSimDynamic();

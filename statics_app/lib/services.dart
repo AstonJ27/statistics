@@ -45,6 +45,7 @@ class NativeService {
     return AnalyzeResult.fromJson(j);
   }
 
+  // --- Simulacion --
   static String simulateCarwash(int hours, double lambda) {
     if (simulateCarwashNative == null || freeCStringNative == null) {
       throw Exception('Binding simulate_carwash_json no encontrado');
@@ -56,6 +57,27 @@ class NativeService {
     final jsonStr = ptr.toDartString();
     freeCStringNative!(ptr);
     return jsonStr;
+  }
+
+  static String runSimulationDynamic(Map<String, dynamic> config) {
+    if (simulateDynamicNative == null || freeCStringNative == null) {
+      throw Exception('Binding simulate_carwash_dynamic no encontrado');
+    }
+    
+    // Serializar el mapa a JSON string
+    final jsonString = jsonEncode(config);
+    final ptrName = jsonString.toNativeUtf8();
+    
+    try {
+      final ptr = simulateDynamicNative!(ptrName);
+      if (ptr.address == 0) return "{\"error\": \"Error interno en Rust\"}";
+      
+      final resJson = ptr.toDartString();
+      freeCStringNative!(ptr);
+      return resJson;
+    } finally {
+      calloc.free(ptrName);
+    }
   }
 
 }
