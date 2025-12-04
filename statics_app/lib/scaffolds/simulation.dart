@@ -272,37 +272,52 @@ class _SimulationPageState extends State<SimulationPage> {
 
   Widget _buildResults() {
     final result = _result!;
-
-    // Totales: Satisfechos = sum(h.served), Insatisfechos = sum(c.left), Pendientes = sum(h.pending)
-    int totalCars = 0;
-    int totalSatisfied = 0;   // suma de h.served
-    int totalUnsatisfied = 0; // suma de abandonos (c.left)
-    int totalPending = 0;     // suma de h.pending
-
+  
+    // Totales: Satisfechos = sum(h.served), Insatisfechos = sum(h.leftCount), Pendientes = sum(h.pending)
+    int totalCars = result.totalCars;
+    int totalSatisfied = 0;
+    int totalUnsatisfied = 0;
+    int totalPending = 0;
+  
     for (final h in result.hours) {
       totalSatisfied += h.served;
       totalPending += h.pending;
-      for (final c in h.cars) {
-        totalCars += 1;
-        try {
-          if ((c as dynamic).left == true) totalUnsatisfied += 1;
-        } catch (_) {}
+      // Si el backend incluye leftCount, sumarlo
+      try {
+        if ((h as dynamic).leftCount != null) {
+          totalUnsatisfied += (h as dynamic).leftCount as int;
+        } else {
+          // Si no hay leftCount, contar manualmente
+          for (final c in h.cars) {
+            try {
+              if ((c as dynamic).left == true) totalUnsatisfied += 1;
+            } catch (_) {}
+          }
+        }
+      } catch (_) {
+        // Contar manualmente si hay error
+        for (final c in h.cars) {
+          try {
+            if ((c as dynamic).left == true) totalUnsatisfied += 1;
+          } catch (_) {}
+        }
       }
     }
-
-    final int resolved = totalSatisfied + totalUnsatisfied + totalPending;
-    final double satPct = resolved == 0 ? 0.0 : (totalSatisfied / resolved) * 100.0;
-    final double unsatPct = resolved == 0 ? 0.0 : (totalUnsatisfied / resolved) * 100.0;
-
+  
+    // Los porcentajes se calculan sobre el TOTAL de carros (satisfechos + insatisfechos + pendientes)
+    final double satPct = totalCars == 0 ? 0.0 : (totalSatisfied / totalCars) * 100.0;
+    final double unsatPct = totalCars == 0 ? 0.0 : (totalUnsatisfied+totalPending / totalCars) * 100.0;
+    // NOTA: Los pendientes no se incluyen en los porcentajes de los donuts
+  
     return Column(
       children: [
         const SizedBox(height: 20),
-
-        // NEW: Card with Poisson + Randoms (fixed height, scrollable)
+  
+        // Card with Poisson + Randoms (fixed height, scrollable)
         _poissonAndRandomsCard(),
-
+  
         const SizedBox(height: 12),
-
+  
         // Resumen Global MODIFICADO: Donuts debajo de los números
         Card(
           color: Colors.grey.shade900,
@@ -362,9 +377,9 @@ class _SimulationPageState extends State<SimulationPage> {
                     ),
                   ],
                 ),
-
+  
                 const SizedBox(height: 20),
-
+  
                 // Donuts debajo de los números
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 8),
@@ -419,31 +434,29 @@ class _SimulationPageState extends State<SimulationPage> {
                           ),
                         ],
                       ),
-
-                      // Pendientes (centrados)
-                      if (totalPending > 0) ...[
-                        const SizedBox(height: 16),
-                        Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: Colors.orange.withOpacity(0.3),
-                              ),
+                      
+                      // Pendientes (centrados) - Se muestran aparte
+                      const SizedBox(height: 16),
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Colors.orange.withOpacity(0.3),
                             ),
-                            child: Text(
-                              "Pendientes hoy: $totalPending autos",
-                              style: const TextStyle(
-                                color: Colors.orange,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                              ),
+                          ),
+                          child: Text(
+                            "Pendientes hoy: $totalPending autos",
+                            style: const TextStyle(
+                              color: Colors.orange,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
-                      ],
+                      ),
                     ],
                   ),
                 ),
@@ -451,25 +464,47 @@ class _SimulationPageState extends State<SimulationPage> {
             ),
           ),
         ),
-
+  
         const SizedBox(height: 12),
-
-        // Cards por cada hora (plegables) - responsive y sin overflow
+  
+        // Cards por cada hora (plegables)
         ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: result.hours.length,
           itemBuilder: (ctx, idx) {
             final h = result.hours[idx];
-            final hSatisfied = h.served;
-            final hUnsatisfied = h.cars.where((c) {
-              try {
-                return (c as dynamic).left == true;
-              } catch (_) {
-                return false;
+            
+            // Calcular satisfechos, insatisfechos y pendientes por hora
+            int hSatisfied = h.served;
+            int hPending = h.pending;
+            int hUnsatisfied = 0;
+            
+            // Intentar obtener leftCount del backend
+            try {
+              if ((h as dynamic).leftCount != null) {
+                hUnsatisfied = (h as dynamic).leftCount as int;
+              } else {
+                // Contar manualmente
+                hUnsatisfied = h.cars.where((c) {
+                  try {
+                    return (c as dynamic).left == true;
+                  } catch (_) {
+                    return false;
+                  }
+                }).length;
               }
-            }).length;
-
+            } catch (_) {
+              // Contar manualmente si hay error
+              hUnsatisfied = h.cars.where((c) {
+                try {
+                  return (c as dynamic).left == true;
+                } catch (_) {
+                  return false;
+                }
+              }).length;
+            }
+  
             return Card(
               color: const Color(BG_CARD),
               margin: const EdgeInsets.only(bottom: 10),
@@ -478,25 +513,25 @@ class _SimulationPageState extends State<SimulationPage> {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   // Título (hora + llegadas)
                   Text("Hora ${h.hourIndex}  •  Llegadas estimadas: ${h.estimated}", style: const TextStyle(fontWeight: FontWeight.bold)),
-
+  
                   const SizedBox(height: 8),
-                  // Satisfechos/Insatisfechos (DEBAJO del título, como pediste)
+                  // Satisfechos/Insatisfechos/Pendientes
                   Row(children: [
                     _badge(Colors.green, "Satisfechos: $hSatisfied"),
                     const SizedBox(width: 8),
-                    _badge(Colors.red, "Insatisfechos: $hUnsatisfied"),
+                    _badge(Colors.red, "Insatisfechos: ${hUnsatisfied+hPending}"),
                     const SizedBox(width: 8),
-                    _badge(h.pending > 0 ? Colors.orange : Colors.grey, "Pendientes: ${h.pending}"),
+                    _badge(hPending > 0 ? Colors.orange : Colors.grey, "Pendientes: $hPending"),
                   ]),
-
+  
                   const SizedBox(height: 10),
-
+  
                   // Expansion area: plegable para ver los carros
                   ExpansionTile(
                     tilePadding: EdgeInsets.zero,
                     title: const Text("Detalle de carros", style: TextStyle(color: Colors.white70, fontSize: 13)),
                     children: [
-                      // Fixed height area with vertical scroll for car list to avoid overflow on small screens
+                      // Fixed height area with vertical scroll for car list
                       ConstrainedBox(
                         constraints: const BoxConstraints(maxHeight: 320),
                         child: Scrollbar(
@@ -505,22 +540,51 @@ class _SimulationPageState extends State<SimulationPage> {
                             child: Column(
                               children: h.cars.map((c) {
                                 final double hourEnd = (h.hourIndex as int) * 60.0;
-                                final bool isLeft = (() {
-                                  try { return (c as dynamic).left == true; } catch (_) { return false; }
-                                })();
-                                final bool isPending = (!isLeft) && (c.end > hourEnd);
-
+                                
+                                // Determinar estado del carro
+                                bool isLeft = false;
+                                bool isPending = false;
+                                bool isSatisfied = false;
+                                
+                                try {
+                                  isLeft = (c as dynamic).left == true;
+                                  isPending = (c as dynamic).pending == true;
+                                  isSatisfied = (c as dynamic).satisfied == true;
+                                } catch (_) {
+                                  // Si no hay nuevos campos, usar lógica anterior
+                                  isLeft = (() {
+                                    try { return (c as dynamic).left == true; } catch (_) { return false; }
+                                  })();
+                                  isPending = (!isLeft) && (c.end > hourEnd);
+                                  isSatisfied = (!isLeft) && !isPending;
+                                }
+  
+                                Color statusColor = Colors.white70;
+                                String statusText = "";
+                                
+                                if (isLeft) {
+                                  statusColor = Colors.redAccent;
+                                  statusText = "Abandonó (insatisfecho)";
+                                } else if (isPending) {
+                                  statusColor = Colors.redAccent; //Colors.orangeAccent;
+                                  statusText = "Pendiente (sigue en servicio)";
+                                } else {
+                                  statusColor = Colors.green;
+                                  statusText = "Atendido (satisfecho)";
+                                }
+  
                                 return Card(
                                   color: Colors.black12,
                                   margin: const EdgeInsets.symmetric(vertical: 6),
                                   child: Padding(
                                     padding: const EdgeInsets.all(8),
                                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [  //Se imprime la id del carro y su tiempo total
                                         Text("Carro ${c.id}", style: const TextStyle(fontWeight: FontWeight.bold)),
-                                        Text("${c.total.toStringAsFixed(2)} min", style: const TextStyle(color: Color(GREEN), fontWeight: FontWeight.bold)),
+                                        Text("${(c.total-c.wait).toStringAsFixed(2)} min", style: const TextStyle(color: Color(GREEN), fontWeight: FontWeight.bold)),
                                       ]),
                                       const SizedBox(height: 6),
+                                      // Estaciones como chips
                                       if ((c as dynamic).stageDurations != null && (c as dynamic).stageDurations.length > 0)
                                         Wrap(
                                           spacing: 8,
@@ -537,12 +601,8 @@ class _SimulationPageState extends State<SimulationPage> {
                                       else
                                         Text("Tiempos por estación no disponibles", style: TextStyle(color: Colors.white54)),
                                       const SizedBox(height: 8),
-                                      if (isLeft)
-                                        Text("Abandonó (insatisfecho) — Espera: ${c.wait.toStringAsFixed(2)} min", style: const TextStyle(color: Colors.redAccent))
-                                      else if (isPending)
-                                        Text("Pendiente (sigue en servicio) — Espera: ${c.wait.toStringAsFixed(2)} min", style: const TextStyle(color: Colors.orangeAccent))
-                                      else
-                                        Text("Atendido (satisfecho) — Espera: ${c.wait.toStringAsFixed(2)} min", style: const TextStyle(color: Colors.white70)),
+                                      // Estado del carro
+                                      Text("$statusText — Espera: ${c.wait.toStringAsFixed(2)} min", style: TextStyle(color: statusColor)),
                                     ]),
                                   ),
                                 );
@@ -612,7 +672,7 @@ class _SimulationPageState extends State<SimulationPage> {
               // 2. CONFIGURACIÓN DE ETAPAS (Dinámica)
               const Align(
                 alignment: Alignment.centerLeft, 
-                child: Text("Estaciones del Autolavado (Pipeline)", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold))
+                child: Text("Estaciones del Autolavado", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold))
               ),
               const SizedBox(height: 5),
               
