@@ -216,82 +216,7 @@ class AnalyzeResult {
 
 // --- SIMULATION MODELS ---
 
-class SimResult {
-  final List<SimHour> hours;
-  final int totalCars;
-  final double avgTotalTime;
-  final double stdTotalTime;
-
-  SimResult({
-    required this.hours,
-    required this.totalCars,
-    required this.avgTotalTime,
-    required this.stdTotalTime,
-  });
-
-  factory SimResult.fromJson(Map<String, dynamic> json) {
-    return SimResult(
-      hours: (json['hours'] as List).map((e) => SimHour.fromJson(e)).toList(),
-      totalCars: json['total_cars'] as int,
-      avgTotalTime: (json['avg_total_time'] as num).toDouble(),
-      stdTotalTime: (json['std_total_time'] as num).toDouble(),
-    );
-  }
-}
-
-class SimHour {
-  final int hourIndex;
-  final int carsArrived;
-  final List<SimCar> cars;
-
-  SimHour({required this.hourIndex, required this.carsArrived, required this.cars});
-
-  factory SimHour.fromJson(Map<String, dynamic> json) {
-    return SimHour(
-      hourIndex: json['hour_index'] as int,
-      carsArrived: json['cars_arrived'] as int,
-      cars: (json['cars'] as List).map((e) => SimCar.fromJson(e)).toList(),
-    );
-  }
-}
-
-class SimCar {
-  final int carId;
-  final double cleanTime;
-  final double washTime;
-  final double dryTime;
-  final double totalTime;
-
-  SimCar({
-    required this.carId,
-    required this.cleanTime,
-    required this.washTime,
-    required this.dryTime,
-    required this.totalTime,
-  });
-
-  factory SimCar.fromJson(Map<String, dynamic> json) {
-    return SimCar(
-      carId: json['car_id'] as int,
-      cleanTime: (json['clean_time'] as num).toDouble(),
-      washTime: (json['wash_time'] as num).toDouble(),
-      dryTime: (json['dry_time'] as num).toDouble(),
-      totalTime: (json['total_time'] as num).toDouble(),
-    );
-  }
-}
-
-class SimResultV2 {
-  final List<HourMetrics> hours;
-  final int totalCars;
-  final double avgWaitTime;
-
-  SimResultV2.fromJson(Map<String, dynamic> json)
-      : hours = (json['hours'] as List).map((e) => HourMetrics.fromJson(e)).toList(),
-        totalCars = json['total_cars'],
-        avgWaitTime = (json['avg_wait_time'] as num).toDouble();
-}
-
+// lib/models.dart  
 class HourMetrics {
   final int hourIndex;
   final int estimated; // Poisson
@@ -314,6 +239,8 @@ class CarResult {
   final double end;
   final double total;
   final double wait;
+  final List<double> stageDurations;
+  final bool left; // nuevo
 
   CarResult.fromJson(Map<String, dynamic> json)
       : id = json['car_id'],
@@ -321,5 +248,20 @@ class CarResult {
         start = (json['start_time'] as num).toDouble(),
         end = (json['end_time'] as num).toDouble(),
         total = (json['total_duration'] as num).toDouble(),
-        wait = (json['wait_time'] as num).toDouble();
+        wait = (json['wait_time'] as num).toDouble(),
+        stageDurations = (json['stage_durations'] != null)
+            ? (json['stage_durations'] as List).map((e) => (e as num).toDouble()).toList()
+            : <double>[],
+        left = json['left'] != null ? (json['left'] as bool) : false;
+}
+
+class SimResultV2 {
+  final List<HourMetrics> hours;
+  final int totalCars;
+  final double avgWaitTime;
+
+  SimResultV2.fromJson(Map<String, dynamic> json)
+      : hours = (json['hours'] as List).map((e) => HourMetrics.fromJson(e)).toList(),
+        totalCars = json['total_cars'],
+        avgWaitTime = (json['avg_wait_time'] as num).toDouble();
 }

@@ -138,7 +138,7 @@ pub extern "C" fn rust_core_version() -> u32 {
     1u32
 }
 
-// --- NUEVA EXPORTACIÓN PARA LA SIMULACIÓN ---
+// --- EXPORTACIÓN PARA LA SIMULACIÓN ---
 #[no_mangle]
 pub extern "C" fn simulate_carwash_dynamic(json_config: *const c_char) -> *mut c_char {
     match simulations::carwash::run_simulation_dynamic(json_config) {

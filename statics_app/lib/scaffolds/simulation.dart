@@ -1,4 +1,6 @@
+// lib/scaffolds/simulation.dart
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 // Imports de lógica
@@ -76,8 +78,6 @@ class _SimulationPageState extends State<SimulationPage> {
         if (s.type == Generator.exponential) typeStr = 'exponential';
         if (s.type == Generator.uniform) typeStr = 'uniform';
 
-        // Nota: Enviamos los valores tal cual. 
-        // Rust se encarga de convertir Varianza -> StdDev y Beta -> Lambda
         stagesConfig.add({
           "name": s.name,
           "dist_type": typeStr,
@@ -92,7 +92,7 @@ class _SimulationPageState extends State<SimulationPage> {
         "stages": stagesConfig
       };
 
-      // Llamada al servicio
+      // Llamada al servicio (nativa Rust)
       final jsonStr = await Future.delayed(Duration.zero, () => NativeService.runSimulationDynamic(fullConfig));
       final Map<String, dynamic> jsonMap = jsonDecode(jsonStr);
       
@@ -108,145 +108,6 @@ class _SimulationPageState extends State<SimulationPage> {
         _loading = false;
       });
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            // 1. CONFIGURACIÓN GLOBAL
-            Card(
-              color: const Color(BG_CARD),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text("Configuración General", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(child: _buildInput(_lambdaCtrl, "Llegadas/Hora (Poisson)", icon: Icons.people)),
-                        const SizedBox(width: 10),
-                        Expanded(child: _buildInput(_hoursCtrl, "Horas a Simular", icon: Icons.timer)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 10),
-
-            // 2. CONFIGURACIÓN DE ETAPAS (Dinámica)
-            const Align(
-              alignment: Alignment.centerLeft, 
-              child: Text("Estaciones del Autolavado (Pipeline)", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold))
-            ),
-            const SizedBox(height: 5),
-            
-            // Renderizamos la lista de etapas
-            ..._stages.asMap().entries.map((entry) {
-              int idx = entry.key;
-              StageInput stage = entry.value;
-              return Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                color: const Color(BG_CARD),
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          CircleAvatar(backgroundColor: const Color(PRIMARY), radius: 12, child: Text("${idx+1}", style: const TextStyle(fontSize: 12, color: Colors.white))),
-                          const SizedBox(width: 10),
-                          // Dropdown para tipo de distribución
-                          Expanded(
-                            child: DropdownButton<Generator>(
-                              value: stage.type,
-                              dropdownColor: const Color(BG_CARD),
-                              isDense: true,
-                              style: const TextStyle(color: Colors.white),
-                              underline: Container(),
-                              items: const [
-                                DropdownMenuItem(value: Generator.normal, child: Text("Normal")),
-                                DropdownMenuItem(value: Generator.exponential, child: Text("Exponencial")),
-                                DropdownMenuItem(value: Generator.uniform, child: Text("Uniforme")),
-                              ],
-                              onChanged: (g) => setState(() => stage.type = g!),
-                            ),
-                          ),
-                          // Botón borrar
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
-                            onPressed: () => _removeStage(idx),
-                          )
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      // Inputs dinámicos según la distribución
-                      Row(
-                        children: [
-                          if (stage.type == Generator.normal) ...[
-                            Expanded(child: _buildInput(stage.p1Ctrl, "Media (μ)")),
-                            const SizedBox(width: 10),
-                            Expanded(child: _buildInput(stage.p2Ctrl, "Varianza (σ²)")),
-                          ] else if (stage.type == Generator.exponential) ...[
-                            Expanded(child: _buildInput(stage.p1Ctrl, "Beta (β)")),
-                          ] else ...[
-                            Expanded(child: _buildInput(stage.p1Ctrl, "Mínimo")),
-                            const SizedBox(width: 10),
-                            Expanded(child: _buildInput(stage.p2Ctrl, "Máximo")),
-                          ]
-                        ],
-                      )
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-
-            // Botón Agregar
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.white10, foregroundColor: Colors.white),
-              onPressed: _addStage,
-              icon: const Icon(Icons.add),
-              label: const Text("Agregar Estación"),
-            ),
-
-            const SizedBox(height: 20),
-
-            // Botón Iniciar
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(GREEN),
-                  foregroundColor: const Color(BG_PRIMARY),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: _loading ? null : _runSimulation,
-                icon: _loading ? const SizedBox(height:20, width:20, child: CircularProgressIndicator()) : const Icon(Icons.play_circle_fill),
-                label: const Text("INICIAR SIMULACIÓN"),
-              ),
-            ),
-
-            if (_error.isNotEmpty) 
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: Text(_error, style: const TextStyle(color: Colors.red)),
-              ),
-
-            // 3. RESULTADOS
-            if (_result != null) _buildResults(),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _buildInput(TextEditingController ctrl, String label, {IconData? icon}) {
@@ -265,83 +126,595 @@ class _SimulationPageState extends State<SimulationPage> {
     );
   }
 
+  // -----------------------
+  // Helpers para Poisson y mapeo por inversión
+  // -----------------------
+  List<Map<String,double>> _buildPoissonTable(double lambda, int hours) {
+    List<Map<String,double>> table = [];
+    double e_minus_lambda = math.exp(-lambda);
+    double pk = e_minus_lambda; // p0
+    double cumulative = 0.0;
+    for (int k = 0; k < hours; k++) {
+      if (k == 0) {
+        pk = e_minus_lambda;
+      } else {
+        pk = pk * lambda / k; // recurrencia p_k = p_{k-1} * λ / k
+      }
+      cumulative += pk;
+      table.add({ 'x': k.toDouble(), 'cdf': cumulative });
+    }
+    return table;
+  }
+
+  List<Map<String, dynamic>> _buildRandomsMapped(List<Map<String,double>> cdfTable, int n) {
+    final rnd = math.Random();
+    List<Map<String, dynamic>> rows = [];
+    for (int i = 0; i < n; i++) {
+      double u = rnd.nextDouble();
+      int xi = 0;
+      for (final row in cdfTable) {
+        if (u <= row['cdf']!) {
+          xi = row['x']!.toInt();
+          break;
+        }
+      }
+      rows.add({'u': u, 'xi': xi});
+    }
+    return rows;
+  }
+
+  // -----------------------
+  // Widgets de UI reutilizables
+  // -----------------------
+
+  // Donut circular simple usando CircularProgressIndicator (sin paquetes extra)
+  Widget _donut(double pct, Color color, String label, {double size = 72}) {
+    final value = (pct.clamp(0.0, 100.0)) / 100.0;
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(alignment: Alignment.center, children: [
+        SizedBox(
+          width: size,
+          height: size,
+          child: CircularProgressIndicator(
+            value: value,
+            strokeWidth: 10,
+            backgroundColor: Colors.white10,
+            valueColor: AlwaysStoppedAnimation<Color>(color),
+          ),
+        ),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("${pct.toStringAsFixed(0)}%", style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text(label, style: const TextStyle(fontSize: 10, color: Colors.white70)),
+          ],
+        )
+      ]),
+    );
+  }
+
+  // Card fijo con scroll (alto fijo adaptativo según ancho)
+  Widget _fixedCardWithScroll({required Widget child, required double height}) {
+    return LayoutBuilder(builder: (context, constraints) {
+      final maxW = constraints.maxWidth;
+      final h = height; // already chosen
+      return Card(
+        color: const Color(BG_CARD),
+        child: SizedBox(
+          height: h,
+          child: Scrollbar(
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(12.0),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: maxW - 24),
+                child: child,
+              ),
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
+  // Poisson horizontal: columnas X=0..hours-1, single row for F(X)
+  Widget _poissonHorizontalTable(double lambda, int hours) {
+    final table = _buildPoissonTable(lambda, hours);
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columns: table.map((r) => DataColumn(label: Text('X=${r['x']!.toInt()}'))).toList(),
+        rows: [
+          DataRow(
+            cells: table.map((r) => DataCell(Text(r['cdf']!.toStringAsFixed(4)))).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Randoms horizontal: columns 1..n, row0 = u, row1 = x_i
+  Widget _randomsHorizontalTable(List<Map<String,double>> cdfTable, int n) {
+    final rows = _buildRandomsMapped(cdfTable, n);
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columns: List.generate(n, (i) => DataColumn(label: Text('${i+1}'))),
+        rows: [
+          DataRow(cells: rows.map((r) => DataCell(Text((r['u'] as double).toStringAsFixed(4)))).toList()),
+          DataRow(cells: rows.map((r) => DataCell(Text('${r['xi']}'))).toList()),
+        ],
+      ),
+    );
+  }
+
+  Widget _poissonAndRandomsCard() {
+    final lambda = double.tryParse(_lambdaCtrl.text) ?? 3.0;
+    final hrs = int.tryParse(_hoursCtrl.text) ?? 8;
+    final poissonTable = _buildPoissonTable(lambda, hrs);
+    // For mapping use hrs randoms
+    final randomsCount = hrs;
+    return _fixedCardWithScroll(
+      height: 180,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text("Poisson (X across columns) y mapeo de #ran -> x_i (horizontales)", style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        // Poisson horizontal table
+        _poissonHorizontalTable(lambda, hrs),
+        const SizedBox(height: 12),
+        // Randoms horizontal table (u row and xi row)
+        _randomsHorizontalTable(poissonTable, randomsCount),
+      ]),
+    );
+  }
+
   Widget _buildResults() {
+    final result = _result!;
+
+    // Totales: Satisfechos = sum(h.served), Insatisfechos = sum(c.left), Pendientes = sum(h.pending)
+    int totalCars = 0;
+    int totalSatisfied = 0;   // suma de h.served
+    int totalUnsatisfied = 0; // suma de abandonos (c.left)
+    int totalPending = 0;     // suma de h.pending
+
+    for (final h in result.hours) {
+      totalSatisfied += h.served;
+      totalPending += h.pending;
+      for (final c in h.cars) {
+        totalCars += 1;
+        try {
+          if ((c as dynamic).left == true) totalUnsatisfied += 1;
+        } catch (_) {}
+      }
+    }
+
+    final int resolved = totalSatisfied + totalUnsatisfied + totalPending;
+    final double satPct = resolved == 0 ? 0.0 : (totalSatisfied / resolved) * 100.0;
+    final double unsatPct = resolved == 0 ? 0.0 : (totalUnsatisfied / resolved) * 100.0;
+
     return Column(
       children: [
         const SizedBox(height: 20),
-        // Resumen Global
+
+        // NEW: Card with Poisson + Randoms (fixed height, scrollable)
+        _poissonAndRandomsCard(),
+
+        const SizedBox(height: 12),
+
+        // Resumen Global MODIFICADO: Donuts debajo de los números
         Card(
-          color: const Color(GREEN).withOpacity(0.2),
+          color: Colors.grey.shade900,
           child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _stat("Total Autos", "${_result!.totalCars}"),
-                _stat("Espera Prom.", "${_result!.avgWaitTime.toStringAsFixed(2)} min"),
+                // Fila con los números (Total Autos y Espera Prom.)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            result.totalCars.toString(),
+                            style: const TextStyle(
+                              fontSize: 32,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            "Total Autos",
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white.withOpacity(0.7),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "${result.avgWaitTime.toStringAsFixed(2)}",
+                            style: const TextStyle(
+                              fontSize: 32,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            "Espera Prom. (min)",
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white.withOpacity(0.7),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+
+                // Donuts debajo de los números
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      top: BorderSide(
+                        color: Colors.white.withOpacity(0.1),
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Satisfacción del Cliente",
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.white.withOpacity(0.8),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          Column(
+                            children: [
+                              _donut(satPct, Colors.green, "Satisfechos", size: 80),
+                              const SizedBox(height: 8),
+                              Text(
+                                "$totalSatisfied autos",
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white.withOpacity(0.7),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Column(
+                            children: [
+                              _donut(unsatPct, Colors.red, "Insatisfechos", size: 80),
+                              const SizedBox(height: 8),
+                              Text(
+                                "$totalUnsatisfied autos",
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white.withOpacity(0.7),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+
+                      // Pendientes (centrados)
+                      if (totalPending > 0) ...[
+                        const SizedBox(height: 16),
+                        Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.orange.withOpacity(0.3),
+                              ),
+                            ),
+                            child: Text(
+                              "Pendientes hoy: $totalPending autos",
+                              style: const TextStyle(
+                                color: Colors.orange,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 10),
-        
-        // Detalle por Horas
+
+        const SizedBox(height: 12),
+
+        // Cards por cada hora (plegables) - responsive y sin overflow
         ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: _result!.hours.length,
-          itemBuilder: (ctx, i) {
-            final h = _result!.hours[i];
+          itemCount: result.hours.length,
+          itemBuilder: (ctx, idx) {
+            final h = result.hours[idx];
+            final hSatisfied = h.served;
+            final hUnsatisfied = h.cars.where((c) {
+              try {
+                return (c as dynamic).left == true;
+              } catch (_) {
+                return false;
+              }
+            }).length;
+
             return Card(
               color: const Color(BG_CARD),
-              child: ExpansionTile(
-                title: Text("Hora ${h.hourIndex}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                subtitle: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  // Título (hora + llegadas)
+                  Text("Hora ${h.hourIndex}  •  Llegadas estimadas: ${h.estimated}", style: const TextStyle(fontWeight: FontWeight.bold)),
+
+                  const SizedBox(height: 8),
+                  // Satisfechos/Insatisfechos (DEBAJO del título, como pediste)
+                  Row(children: [
+                    _badge(Colors.green, "Satisfechos: $hSatisfied"),
+                    const SizedBox(width: 8),
+                    _badge(Colors.red, "Insatisfechos: $hUnsatisfied"),
+                    const SizedBox(width: 8),
+                    _badge(h.pending > 0 ? Colors.orange : Colors.grey, "Pendientes: ${h.pending}"),
+                  ]),
+
+                  const SizedBox(height: 10),
+
+                  // Expansion area: plegable para ver los carros
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text("Detalle de carros", style: TextStyle(color: Colors.white70, fontSize: 13)),
                     children: [
-                      _badge(Colors.blue, "Est: ${h.estimated}"),
-                      const SizedBox(width: 5),
-                      _badge(Colors.green, "Ok: ${h.served}"),
-                      const SizedBox(width: 5),
-                      // Pendientes (Insatisfechos/En cola al final de la hora)
-                      _badge(h.pending > 0 ? Colors.orange : Colors.grey, "Pend: ${h.pending}"),
+                      // Fixed height area with vertical scroll for car list to avoid overflow on small screens
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 320),
+                        child: Scrollbar(
+                          thumbVisibility: true,
+                          child: SingleChildScrollView(
+                            child: Column(
+                              children: h.cars.map((c) {
+                                final double hourEnd = (h.hourIndex as int) * 60.0;
+                                final bool isLeft = (() {
+                                  try { return (c as dynamic).left == true; } catch (_) { return false; }
+                                })();
+                                final bool isPending = (!isLeft) && (c.end > hourEnd);
+
+                                return Card(
+                                  color: Colors.black12,
+                                  margin: const EdgeInsets.symmetric(vertical: 6),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(8),
+                                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                                        Text("Carro ${c.id}", style: const TextStyle(fontWeight: FontWeight.bold)),
+                                        Text("${c.total.toStringAsFixed(2)} min", style: const TextStyle(color: Color(GREEN), fontWeight: FontWeight.bold)),
+                                      ]),
+                                      const SizedBox(height: 6),
+                                      if ((c as dynamic).stageDurations != null && (c as dynamic).stageDurations.length > 0)
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 6,
+                                          children: (c as dynamic).stageDurations.asMap().entries.map<Widget>((e) {
+                                            final idxStage = e.key + 1;
+                                            final val = e.value as double;
+                                            return Chip(
+                                              backgroundColor: Colors.black12,
+                                              label: Text("Est${idxStage}: ${val.toStringAsFixed(2)} min"),
+                                            );
+                                          }).toList(),
+                                        )
+                                      else
+                                        Text("Tiempos por estación no disponibles", style: TextStyle(color: Colors.white54)),
+                                      const SizedBox(height: 8),
+                                      if (isLeft)
+                                        Text("Abandonó (insatisfecho) — Espera: ${c.wait.toStringAsFixed(2)} min", style: const TextStyle(color: Colors.redAccent))
+                                      else if (isPending)
+                                        Text("Pendiente (sigue en servicio) — Espera: ${c.wait.toStringAsFixed(2)} min", style: const TextStyle(color: Colors.orangeAccent))
+                                      else
+                                        Text("Atendido (satisfecho) — Espera: ${c.wait.toStringAsFixed(2)} min", style: const TextStyle(color: Colors.white70)),
+                                    ]),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
-                ),
-                children: h.cars.map((c) => ListTile(
-                  dense: true,
-                  leading: Text(
-                    "${(c.arrival % 60).toStringAsFixed(0)}'", 
-                    style: const TextStyle(color: Colors.white54, fontSize: 12)
-                  ),
-                  title: Text("Carro ${c.id}", style: const TextStyle(color: Colors.white)),
-                  trailing: Text(
-                    "${c.total.toStringAsFixed(1)} min", 
-                    style: const TextStyle(color: Color(GREEN), fontWeight: FontWeight.bold)
-                  ),
-                  subtitle: Text(
-                    c.wait > 0.1 ? "Espera en cola: ${c.wait.toStringAsFixed(1)} min" : "Entrada inmediata",
-                    style: TextStyle(color: c.wait > 5 ? Colors.redAccent : Colors.white30, fontSize: 11),
-                  ),
-                )).toList(),
+                ]),
               ),
             );
           },
-        )
+        ),
       ],
     );
   }
 
   Widget _badge(Color color, String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: color.withOpacity(0.2), borderRadius: BorderRadius.circular(4), border: Border.all(color: color.withOpacity(0.5))),
-      child: Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(0.4))),
+      child: Text(text, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
     );
   }
 
   Widget _stat(String label, String val) {
     return Column(children: [Text(val, style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)), Text(label, style: const TextStyle(fontSize: 11, color: Colors.white70))]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Usamos SafeArea + SingleChildScrollView (layout responsivo)
+    return SafeArea(
+      child: LayoutBuilder(builder: (context, constraints) {
+        // ajustar paddings / tamaños si es pantalla ancha vs estrecha
+        final isWide = constraints.maxWidth > 700;
+        return SingleChildScrollView(
+          padding: EdgeInsets.symmetric(horizontal: isWide ? 32.0 : 16.0, vertical: 16.0),
+          child: Column(
+            children: [
+              // 1. CONFIGURACIÓN GLOBAL
+              Card(
+                color: const Color(BG_CARD),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("Configuración General", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(child: _buildInput(_lambdaCtrl, "Llegadas/Hora (Poisson)", icon: Icons.people)),
+                          const SizedBox(width: 10),
+                          Expanded(child: _buildInput(_hoursCtrl, "Horas a Simular", icon: Icons.timer)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              // 2. CONFIGURACIÓN DE ETAPAS (Dinámica)
+              const Align(
+                alignment: Alignment.centerLeft, 
+                child: Text("Estaciones del Autolavado (Pipeline)", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold))
+              ),
+              const SizedBox(height: 5),
+              
+              // Renderizamos la lista de etapas
+              ..._stages.asMap().entries.map((entry) {
+                int idx = entry.key;
+                StageInput stage = entry.value;
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  color: const Color(BG_CARD),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(backgroundColor: const Color(PRIMARY), radius: 12, child: Text("${idx+1}", style: const TextStyle(fontSize: 12, color: Colors.white))),
+                            const SizedBox(width: 10),
+                            // Dropdown para tipo de distribución
+                            Expanded(
+                              child: DropdownButton<Generator>(
+                                value: stage.type,
+                                dropdownColor: const Color(BG_CARD),
+                                isDense: true,
+                                style: const TextStyle(color: Colors.white),
+                                underline: Container(),
+                                items: const [
+                                  DropdownMenuItem(value: Generator.normal, child: Text("Normal")),
+                                  DropdownMenuItem(value: Generator.exponential, child: Text("Exponencial")),
+                                  DropdownMenuItem(value: Generator.uniform, child: Text("Uniforme")),
+                                ],
+                                onChanged: (g) => setState(() => stage.type = g!),
+                              ),
+                            ),
+                            // Botón borrar
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                              onPressed: () => _removeStage(idx),
+                            )
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // Inputs dinámicos según la distribución
+                        Row(
+                          children: [
+                            if (stage.type == Generator.normal) ...[
+                              Expanded(child: _buildInput(stage.p1Ctrl, "Media (μ)")),
+                              const SizedBox(width: 10),
+                              Expanded(child: _buildInput(stage.p2Ctrl, "Varianza (σ²)")),
+                            ] else if (stage.type == Generator.exponential) ...[
+                              Expanded(child: _buildInput(stage.p1Ctrl, "Beta (β)")),
+                            ] else ...[
+                              Expanded(child: _buildInput(stage.p1Ctrl, "Mínimo")),
+                              const SizedBox(width: 10),
+                              Expanded(child: _buildInput(stage.p2Ctrl, "Máximo")),
+                            ]
+                          ],
+                        )
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+
+              // Botón Agregar
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.white10, foregroundColor: Colors.white),
+                onPressed: _addStage,
+                icon: const Icon(Icons.add),
+                label: const Text("Agregar Estación"),
+              ),
+
+              const SizedBox(height: 20),
+
+              // Botón Iniciar
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(GREEN),
+                    foregroundColor: const Color(BG_PRIMARY),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: _loading ? null : _runSimulation,
+                  icon: _loading ? const SizedBox(height:20, width:20, child: CircularProgressIndicator()) : const Icon(Icons.play_circle_fill),
+                  label: const Text("INICIAR SIMULACIÓN"),
+                ),
+              ),
+
+              if (_error.isNotEmpty) 
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(_error, style: const TextStyle(color: Colors.red)),
+                ),
+
+              // 3. RESULTADOS
+              if (_result != null) _buildResults(),
+            ],
+          ),
+        );
+      }),
+    );
   }
 }
