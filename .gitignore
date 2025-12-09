@@ -1,2 +1,7 @@
 *.sh
 *.ps1
+./statics_app/android
+./statics_app/ios
+./statics_app/windows
+./statics_app/web
+

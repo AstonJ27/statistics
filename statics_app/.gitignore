@@ -44,4 +44,13 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# mis cambios
 
+/android/
+/ios/
+/macos/
+/windows/
+/test/
+/web/
+/linux/
+/.metadata
