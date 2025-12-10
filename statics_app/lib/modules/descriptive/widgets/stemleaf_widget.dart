@@ -1,6 +1,6 @@
 // lib/widgets/stemleaf_widget.dart
 import 'package:flutter/material.dart';
-import '../models.dart';
+import '../models/descriptive_models.dart';
 
 class StemLeafWidget extends StatelessWidget {
   final List<StemLeafItem> items;

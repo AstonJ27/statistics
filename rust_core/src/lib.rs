@@ -116,21 +116,6 @@ pub extern "C" fn summary_stats_json(ptr: *const f64, len: usize) -> *mut c_char
     }
 }
 
-// Montecarlo - orchestrator (returns JSON array of sample-statistics)
-#[no_mangle]
-pub extern "C" fn montecarlo_stats_json(
-    dist_id: i32,
-    n_samples: usize,
-    n_trials: usize,
-    param1: f64,
-    param2: f64,
-    seed: u64,
-) -> *mut c_char {
-    match sampling::generator::montecarlo_stats_json(dist_id, n_samples, n_trials, param1, param2, seed) {
-        Ok(c) => c,
-        Err(_) => std::ptr::null_mut(),
-    }
-}
 
 // expose a version
 #[no_mangle]

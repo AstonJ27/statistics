@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 
 // Importamos las pantallas separadas
 // Asegúrate de crear la carpeta 'scaffolds' y poner los archivos ahí
-import 'scaffolds/descriptive.dart';
-import 'scaffolds/simulation.dart';
-
+//import 'scaffolds/descriptive.dart';
+//import 'scaffolds/simulation.dart';
+import 'modules/descriptive/screens/descriptive_page.dart';
+import 'modules/simulation/screens/simulation_page.dart';
 // --- PALETA DE COLORES (Global) ---
 const int PRIMARY = 0xFF4E2ECF;       // #4E2ECF (Morado Principal)
 const int BG_PRIMARY = 0xFF1D1D42;    // #1D1D42 (Fondo Oscuro)

@@ -1,7 +1,7 @@
 // lib/widgets/freq_table_widget.dart
 
 import 'package:flutter/material.dart';
-import '../models.dart';
+import '../models/descriptive_models.dart';
 
 // Definimos el color aquí o impórtalo de main si prefieres, 
 // pero para aislar el widget lo pondré aquí.

@@ -1,9 +1,11 @@
-// lib/services.dart
+// lib/core/ffi/native_service.dart
 import 'dart:convert';
 import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 import 'ffi_bindings.dart';
-import 'models.dart';
+
+// CORRECCIÓN: Importar el modelo desde su nueva ubicación en el módulo descriptivo
+import '../../modules/descriptive/models/descriptive_models.dart'; 
 
 class NativeService {
   /// Genera N muestras en la librería nativa
@@ -11,17 +13,14 @@ class NativeService {
   static void generateSamples(Pointer<Double> ptr, int n, {String dist = 'normal', double param1 = 0.0, double param2 = 1.0}) {
     final seed = DateTime.now().microsecondsSinceEpoch & 0xFFFFFFFFFFFF; // fit into 64-bit
     if (dist == 'normal' && generateNormalNative != null) {
-      // generate_normal(ptr, len, mean, std, seed)
       generateNormalNative!(ptr, n, param1, param2, seed.toInt());
       return;
     }
     if (dist == 'exponential' && generateExpNative != null) {
-      // generate_exponential_inverse(ptr, len, beta, seed)
       generateExpNative!(ptr, n, param1, seed.toInt());
       return;
     }
     if (generateUniformNative != null) {
-      // generate_uniform(ptr, len, seed)
       generateUniformNative!(ptr, n, seed.toInt());
       return;
     }
@@ -39,7 +38,6 @@ class NativeService {
       throw Exception('analyze_distribution_json devolvió NULL');
     }
     final jsonStr = resPtr.toDartString();
-    // liberar memoria en C
     freeCStringNative!(resPtr);
     final Map<String, dynamic> j = jsonDecode(jsonStr);
     return AnalyzeResult.fromJson(j);
@@ -79,5 +77,4 @@ class NativeService {
       calloc.free(ptrName);
     }
   }
-
 }

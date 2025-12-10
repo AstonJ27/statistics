@@ -1,198 +1,135 @@
+// src/analysis.rs
+use serde_json::json;
 use crate::json_helpers::to_cstring;
-use crate::utils; // Usaremos esto para el índice seguro
 use crate::errors::Error;
 use std::slice;
-use serde_json::json;
 use std::f64::consts::PI;
-use std::collections::{HashMap, BTreeMap};
+
+// Imports de módulos refactorizados
+use crate::stats::summary;
+use crate::aggregation::{histogram, boxplot, stem_leaf};
+// Para freq_table seguiremos usando lógica inline o llamarías a su fn si la refactorizas
 
 pub fn analyze_distribution_json(ptr: *const f64, len: usize, h_round: bool) -> Result<*mut libc::c_char, Error> {
-    if crate::ffi::check_ptr_len(ptr, len) == false { return Err(Error::NullOrEmptyInput); }
+    if !crate::ffi::check_ptr_len(ptr, len) { return Err(Error::NullOrEmptyInput); }
     
     unsafe {
-        // 1. Preparar datos (Clonar y Ordenar es necesario para mediana y cuantiles)
-        let mut data_slice = slice::from_raw_parts(ptr, len).to_vec();
-        data_slice.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // 1. Preparar datos (ORDENAR UNA SOLA VEZ)
+        let mut data = slice::from_raw_parts(ptr, len).to_vec();
+        data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         
-        let n = data_slice.len();
+        let n = data.len();
         if n == 0 { return Err(Error::NullOrEmptyInput); }
         let n_f64 = n as f64;
 
-        // --- ESTADÍSTICAS BÁSICAS ---
-        let mut sum = 0.0f64;
-        let mut minv = f64::MAX;
-        let mut maxv = f64::MIN;
-        
-        for &x in data_slice.iter() {
-            sum += x;
-            if x < minv { minv = x; }
-            if x > maxv { maxv = x; }
-        }
-        let mean = sum / n_f64;
-
-        // --- MOMENTOS (Varianza, Skewness, Kurtosis) ---
-        let mut m2 = 0.0;
-        let mut m3 = 0.0;
-        let mut m4 = 0.0;
-
-        for &x in data_slice.iter() {
-            let d = x - mean;
-            let d2 = d * d;
-            m2 += d2;
-            m3 += d2 * d;
-            m4 += d2 * d2;
-        }
-
-        let variance_pop = m2 / n_f64;
-        let variance_sample = if n > 1 { m2 / (n_f64 - 1.0) } else { 0.0 };
-        let std_sample = variance_sample.sqrt();
-
-        // Skewness
-        let skewness = if m2 == 0.0 { 0.0 } else { (n_f64 * m3) / m2.powf(1.5) };
-        // Kurtosis Excess
-        let kurtosis_excess = if m2 == 0.0 { -3.0 } else { (n_f64 * m4) / (m2 * m2) - 3.0 };
-
-        // --- MEDIANA ---
-        let median = percentile(&data_slice, 0.5);
-
-        // --- MODA (Múltiple) ---
-        let mut counts_map: HashMap<i64, usize> = HashMap::new();
-        let precision = 10000.0; // Agrupar 4 decimales
-        for &x in data_slice.iter() {
-            let key = (x * precision).round() as i64;
-            *counts_map.entry(key).or_insert(0) += 1;
-        }
-        let maxc = counts_map.values().cloned().max().unwrap_or(0);
-        let mut modes = Vec::new();
-        if maxc > 1 { // Solo si hay repetición
-            for (&k, &v) in counts_map.iter() {
-                if v == maxc {
-                    modes.push((k as f64) / precision);
-                }
-            }
-        }
-        modes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-        // --- BOXPLOT ---
-        let q1 = percentile(&data_slice, 0.25);
-        let q3 = percentile(&data_slice, 0.75);
-        let iqr = q3 - q1;
-        let lower_fence = q1 - 1.5 * iqr;
-        let upper_fence = q3 + 1.5 * iqr;
-        let outliers: Vec<f64> = data_slice.iter().cloned().filter(|&x| x < lower_fence || x > upper_fence).collect();
-
-        // --- STEM & LEAF ---
-        let scale = 100.0;  //Escala que indica cuantos digitos guarda una hoja
-        let mut stem_map: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-        for &x in data_slice.iter() {
-            let scaled = (x * scale).round() as i64;
-            let stem = scaled / (scale as i64);
-            let leaf = (scaled % (scale as i64)).abs();
-            stem_map.entry(stem).or_default().push(leaf);
-        }
-        let mut stemleaf_out = Vec::with_capacity(stem_map.len());
-        for (stem, mut leaves) in stem_map {
-            leaves.sort_unstable();
-            stemleaf_out.push(json!({"stem": stem, "leaves": leaves}));
-        }
-
-        // --- HISTOGRAMA Y TABLA DE FRECUENCIA (Corrección Clave) ---
-        // 1. Usar Sturges centralizado
-        let mut k = utils::sturges_bins(n);
+        // 2. Calcular K (Sturges)
+        let mut k = crate::utils::sturges_bins(n);
         if h_round && k % 2 == 0 { k += 1; }
 
-        // 2. Calcular Amplitud
-        let range = maxv - minv;
-        // Evitar div por cero si range es 0
-        let w = if range.abs() < 1e-9 { 1.0 } else { range / (k as f64) };
+        // 3. Obtener Summary Stats (Usando módulo optimizado)
+        let summary_stats = summary::calculate_summary_sorted(&data, k);
+        let minv = summary_stats.min;
+        let maxv = summary_stats.max;
+        let w = summary_stats.amplitude;
 
-        // 3. Generar Bordes
-        let mut edges: Vec<f64> = Vec::with_capacity(k + 1);
-        for i in 0..=k {
-            if i == k { edges.push(maxv); } else { edges.push(minv + (i as f64) * w); }
-        }
-        
-        // 4. Centros
-        let mut centers: Vec<f64> = Vec::with_capacity(k);
-        for i in 0..k {
-            centers.push(0.5 * (edges[i] + edges[i+1]));
-        }
+        // 4. Boxplot (Usando módulo optimizado)
+        let box_stats = boxplot::calculate_boxplot_sorted(&data);
 
-        // 5. Conteos (Usando utils::bin_index para arreglar el bug del último valor)
-        let mut counts: Vec<u32> = vec![0u32; k];
-        for &x in data_slice.iter() {
-            // AQUÍ ESTÁ EL FIX: Usamos la función segura que maneja x == maxv
-            let idx = utils::bin_index(x, minv, w, k);
-            counts[idx] += 1;
-        }
+        // 5. Histograma (Usando módulo optimizado)
+        let hist_data = histogram::calculate_histogram_logic(&data, k, minv, maxv);
 
-        // 6. Densidades
-        let mut densities: Vec<f64> = Vec::with_capacity(k);
-        for &c in counts.iter() { 
-            densities.push((c as f64) / (n_f64 * w)); 
-        }
+        // 6. Stem & Leaf (Usando wrapper existente, asumiendo scale fijo o dinámico)
+        // Nota: stem_leaf_json original toma puntero, aquí usamos lógica interna si existiera,
+        // si no, replicamos la lógica brevemente para no crear punteros internos.
+        let stem_data = {
+            // Replicación breve de lógica para evitar FFI overhead interno
+            use std::collections::BTreeMap;
+            let scale = 100.0;
+            let mut map: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
+            for &x in &data {
+                let scaled = (x * scale).round() as i64;
+                let stem = scaled / (scale as i64);
+                let leaf = (scaled % (scale as i64)).abs();
+                map.entry(stem).or_default().push(leaf);
+            }
+            let mut out = Vec::new();
+            for (stem, mut leaves) in map {
+                leaves.sort_unstable();
+                out.push(json!({"stem": stem, "leaves": leaves}));
+            }
+            out
+        };
 
-        // 7. Filas de la Tabla
+        // 7. Freq Table (Construimos basándonos en el histograma ya calculado)
+        // Esto evita recalcular bins. Reutilizamos `hist_data`.
         let mut classes = Vec::with_capacity(k);
         let mut cum_abs = 0u32;
         let mut cum_rel = 0.0f64;
         
         for i in 0..k {
-            let lower = edges[i];
-            let upper = edges[i+1];
-            let midpoint = centers[i];
-            let abs_f = counts[i];
+            let abs_f = hist_data.counts[i];
             cum_abs += abs_f;
             let rel = (abs_f as f64) / n_f64;
             cum_rel += rel;
-
+            
+            // Usamos edges del histograma para consistencia perfecta
             classes.push(json!({
-                "lower": lower,
-                "upper": upper,
-                "midpoint": midpoint,
+                "lower": hist_data.edges[i],
+                "upper": hist_data.edges[i+1],
+                "midpoint": hist_data.centers[i],
                 "abs_freq": abs_f,
                 "rel_freq": rel,
                 "cum_abs": cum_abs,
                 "cum_rel": cum_rel
             }));
         }
+        let freq_table_json = json!({ "classes": classes, "amplitude": w });
 
-        // --- BEST FIT (AIC) ---
-        // Parámetros MLE
-        let sigma_mle = (variance_pop).sqrt();
-        let beta = if minv >= 0.0 { mean } else { f64::NAN };
+
+        // 8. BEST FIT (Optimizado y Corregido)
+        let mean = summary_stats.mean;
+        let std = summary_stats.std_pop; // MLE usa población
+
+        // LL Normal
+        let ll_norm = ll_normal(&data, mean, std);
+        let aic_norm = 4.0 - 2.0 * ll_norm;
+
+        // LL Uniform
+        let ll_unif = ll_uniform(&data, minv, maxv);
+        let aic_unif = 4.0 - 2.0 * ll_unif;
+
+        // FIX: Validar negativos para Exp y LogNormal
+        let has_negatives = minv < 0.0;
         
-        // LogNormal params
-        let positive_data: Vec<f64> = data_slice.iter().cloned().filter(|&x| x > 0.0).collect();
-        let (ln_mu, ln_sigma) = if !positive_data.is_empty() {
-            let ln_mean = positive_data.iter().map(|v| v.ln()).sum::<f64>() / (positive_data.len() as f64);
-            let mut s = 0.0;
-            for &x in positive_data.iter() {
-                let d = x.ln() - ln_mean;
-                s += d*d;
-            }
-            let ln_std = (s / (positive_data.len() as f64)).sqrt();
-            (ln_mean, ln_std)
-        } else { (f64::NAN, f64::NAN) };
+        // Exponential
+        let (aic_exp, ll_exp, exp_params) = if has_negatives || mean <= 0.0 {
+            (f64::INFINITY, f64::NEG_INFINITY, vec![])
+        } else {
+            let beta = mean;
+            let ll = ll_exponential(&data, beta);
+            (2.0 - 2.0 * ll, ll, vec![beta])
+        };
 
-        // Log Likelihoods
-        let ll_norm = ll_normal(&data_slice, mean, sigma_mle);
-        let ll_exp = if beta.is_nan() { f64::NEG_INFINITY } else { ll_exponential(&data_slice, beta) };
-        let ll_logn = if ln_mu.is_nan() { f64::NEG_INFINITY } else { ll_lognormal(&data_slice, ln_mu, ln_sigma) };
-        let ll_unif = ll_uniform(&data_slice, minv, maxv);
+        // LogNormal
+        let (aic_logn, ll_logn, logn_params) = if has_negatives || minv <= 0.0 {
+             (f64::INFINITY, f64::NEG_INFINITY, vec![])
+        } else {
+             let ln_data: Vec<f64> = data.iter().map(|x| x.ln()).collect();
+             let ln_mean: f64 = ln_data.iter().sum::<f64>() / n_f64;
+             let ln_var: f64 = ln_data.iter().map(|x| (x - ln_mean).powi(2)).sum::<f64>() / n_f64;
+             let ln_sigma = ln_var.sqrt();
+             let ll = ll_lognormal(&data, ln_mean, ln_sigma);
+             (4.0 - 2.0 * ll, ll, vec![ln_mean, ln_sigma])
+        };
 
-        // AIC = 2k - 2ln(L)
-        let aic_norm = 4.0 - 2.0 * ll_norm;      // k=2
-        let aic_exp = 2.0 - 2.0 * ll_exp;        // k=1
-        let aic_logn = 4.0 - 2.0 * ll_logn;      // k=2
-        let aic_unif = 4.0 - 2.0 * ll_unif;      // k=2 (a, b)
-
+        // Selección del mejor
         let mut fits = vec![
-            ("normal", aic_norm, ll_norm, json!({"params":[mean, sigma_mle]})),
-            ("exponential", aic_exp, ll_exp, json!({"params":[beta]})),
-            ("lognormal", aic_logn, ll_logn, json!({"params":[ln_mu, ln_sigma]})),
+            ("normal", aic_norm, ll_norm, json!({"params":[mean, std]})),
+            ("exponential", aic_exp, ll_exp, json!({"params": exp_params})),
+            ("lognormal", aic_logn, ll_logn, json!({"params": logn_params})),
             ("uniform", aic_unif, ll_unif, json!({"params":[minv, maxv]})),
         ];
+        // Ordenar por AIC menor
         fits.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         
         let best = &fits[0];
@@ -201,87 +138,61 @@ pub fn analyze_distribution_json(ptr: *const f64, len: usize, h_round: bool) -> 
         let best_ll = best.2;
         let best_params = best.3.clone();
 
-        // Curvas esperadas para el Best Fit
-        let mut expected_counts: Vec<f64> = vec![0.0; k];
-        // Calcular CDF en bordes para frequencia esperada
-        let mut cdf_vals: Vec<f64> = Vec::with_capacity(k+1);
-        for &edge in edges.iter() {
-            let v = match best_name {
-                "normal" => normal_cdf(edge, mean, sigma_mle),
-                "exponential" => exponential_cdf(edge, beta),
-                "lognormal" => lognormal_cdf(edge, ln_mu, ln_sigma),
-                "uniform" => uniform_cdf(edge, minv, maxv),
+        // 9. Generar Curvas (Expected Counts y Plot)
+        // ... (Lógica de curvas simplificada usando helpers abajo) ...
+        // Calculamos expected counts usando CDFs en los bordes del histograma
+        let mut expected_counts = vec![0.0; k];
+        let mut cdf_vals = Vec::with_capacity(k+1);
+        
+        // Helper closures para CDF dinámico
+        let cdf_func = |x: f64| -> f64 {
+            match best_name {
+                "normal" => normal_cdf(x, mean, std),
+                "exponential" => if !exp_params.is_empty() { exponential_cdf(x, exp_params[0]) } else { 0.0 },
+                "lognormal" => if !logn_params.is_empty() { lognormal_cdf(x, logn_params[0], logn_params[1]) } else { 0.0 },
+                "uniform" => uniform_cdf(x, minv, maxv),
                 _ => 0.0,
-            };
-            cdf_vals.push(v);
+            }
+        };
+        
+        // PDF function para plotting
+        let pdf_func = |x: f64| -> f64 {
+            match best_name {
+                "normal" => normal_pdf(x, mean, std),
+                "exponential" => if !exp_params.is_empty() { exponential_pdf(x, exp_params[0]) } else { 0.0 },
+                "lognormal" => if !logn_params.is_empty() { lognormal_pdf(x, logn_params[0], logn_params[1]) } else { 0.0 },
+                "uniform" => uniform_pdf(x, minv, maxv),
+                _ => 0.0,
+            }
+        };
+
+        for &edge in &hist_data.edges {
+            cdf_vals.push(cdf_func(edge));
         }
         for i in 0..k {
             let p = (cdf_vals[i+1] - cdf_vals[i]).max(0.0);
             expected_counts[i] = p * n_f64;
         }
 
-        // Curvas para graficar (Plotting)
+        // Puntos para gráfica (Curva suave)
         let mpoints = 100usize;
-        let mut x_plot: Vec<f64> = Vec::with_capacity(mpoints);
-        let mut best_freq: Vec<f64> = Vec::with_capacity(mpoints);
-        
+        let mut x_plot = Vec::with_capacity(mpoints);
+        let mut best_freq = Vec::with_capacity(mpoints);
         for i in 0..mpoints {
             let t = (i as f64) / ((mpoints - 1) as f64);
             let x = minv + t * (maxv - minv);
             x_plot.push(x);
-            
-            let pdf = match best_name {
-                "normal" => normal_pdf(x, mean, sigma_mle),
-                "exponential" => exponential_pdf(x, beta),
-                "lognormal" => lognormal_pdf(x, ln_mu, ln_sigma),
-                "uniform" => uniform_pdf(x, minv, maxv),
-                _ => 0.0
-            };
+            let pdf = pdf_func(x);
             best_freq.push(pdf * n_f64 * w);
         }
 
-        // --- CONSTRUIR JSON FINAL ---
+        // 10. Salida Final
         let out = json!({
-            "summary": {
-                "n": n,
-                "mean": mean,
-                "variance_pop": variance_pop,
-                "variance_sample": variance_sample,
-                "std_sample": std_sample,
-                "median": median,
-                "mode": modes,
-                "skewness": skewness,
-                "kurtosis_excess": kurtosis_excess,
-                "min": minv,
-                "max": maxv,
-                "range": range,
-                "k": k,
-                "amplitude": w
-            },
-            "histogram": {
-                "k": k,
-                "amplitude": w,
-                "edges": edges,
-                "centers": centers,
-                "counts": counts,
-                "densities": densities
-            },
-            "freq_table": {
-                "classes": classes,
-                "amplitude": w
-            },
-            "boxplot": {
-                "min": minv,
-                "q1": q1,
-                "median": median,
-                "q3": q3,
-                "max": maxv,
-                "iqr": iqr,
-                "lower_fence": lower_fence,
-                "upper_fence": upper_fence,
-                "outliers": outliers
-            },
-            "stem_leaf": stemleaf_out,
+            "summary": summary_stats,
+            "histogram": hist_data,
+            "freq_table": freq_table_json,
+            "boxplot": box_stats,
+            "stem_leaf": stem_data,
             "best_fit": {
                 "name": best_name,
                 "aic": best_aic,
@@ -299,44 +210,22 @@ pub fn analyze_distribution_json(ptr: *const f64, len: usize, h_round: bool) -> 
     }
 }
 
-
-// Helper para convertir NaN/Infinity a 0.0 o un valor seguro para JSON
-fn sanitize(v: f64) -> f64 {
-    if v.is_nan() || v.is_infinite() { 0.0 } else { v }
-}
-
-// --- FUNCIONES AUXILIARES PRIVADAS ---
-
-fn percentile(sorted: &Vec<f64>, p: f64) -> f64 {
-    let n = sorted.len();
-    if n == 0 { return 0.0; }
-    let r = p * (n as f64 - 1.0);
-    let i = r.floor() as usize;
-    let f = r - (i as f64);
-    if i + 1 < n { sorted[i] * (1.0 - f) + sorted[i+1] * f } else { sorted[i] }
-}
-
-// Log-Likelihood functions
-fn ll_normal(data: &Vec<f64>, mu: f64, sigma: f64) -> f64 {
+// --- HELPERS MATEMÁTICOS (Privados) ---
+fn ll_normal(data: &[f64], mu: f64, sigma: f64) -> f64 {
     if sigma <= 0.0 { return f64::NEG_INFINITY; }
     let n = data.len() as f64;
-    let log_sigma = sigma.ln();
     let term1 = -0.5 * n * (2.0 * PI).ln();
-    let term2 = -n * log_sigma;
-    let mut sum_sq = 0.0;
-    for &x in data { sum_sq += (x - mu).powi(2); }
+    let term2 = -n * sigma.ln();
+    let sum_sq: f64 = data.iter().map(|x| (x - mu).powi(2)).sum();
     term1 + term2 - sum_sq / (2.0 * sigma * sigma)
 }
-
-fn ll_exponential(data: &Vec<f64>, beta: f64) -> f64 {
+fn ll_exponential(data: &[f64], beta: f64) -> f64 {
     if beta <= 0.0 { return f64::NEG_INFINITY; }
     let n = data.len() as f64;
-    let mut sum = 0.0;
-    for &x in data { sum += x; }
+    let sum: f64 = data.iter().sum();
     -n * beta.ln() - sum / beta
 }
-
-fn ll_lognormal(data: &Vec<f64>, mu: f64, sigma: f64) -> f64 {
+fn ll_lognormal(data: &[f64], mu: f64, sigma: f64) -> f64 {
     if sigma <= 0.0 { return f64::NEG_INFINITY; }
     let n = data.len() as f64;
     let term1 = -0.5 * n * (2.0 * PI).ln();
@@ -345,20 +234,20 @@ fn ll_lognormal(data: &Vec<f64>, mu: f64, sigma: f64) -> f64 {
     let mut sum_sq = 0.0;
     for &x in data {
         if x <= 0.0 { return f64::NEG_INFINITY; }
-        sum_log_x += x.ln();
-        sum_sq += (x.ln() - mu).powi(2);
+        let lx = x.ln();
+        sum_log_x += lx;
+        sum_sq += (lx - mu).powi(2);
     }
     term1 + term2 - sum_log_x - sum_sq / (2.0 * sigma * sigma)
 }
-
-fn ll_uniform(data: &Vec<f64>, a: f64, b: f64) -> f64 {
+fn ll_uniform(data: &[f64], a: f64, b: f64) -> f64 {
     if a >= b { return f64::NEG_INFINITY; }
     let n = data.len() as f64;
     for &x in data { if x < a || x > b { return f64::NEG_INFINITY; } }
     -n * (b - a).ln()
 }
 
-// PDF Functions
+// PDF Implementations
 fn normal_pdf(x: f64, mu: f64, sigma: f64) -> f64 {
     if sigma <= 0.0 { return 0.0; }
     let z = (x - mu) / sigma;
@@ -376,14 +265,13 @@ fn uniform_pdf(x: f64, a: f64, b: f64) -> f64 {
     if x >= a && x <= b && b > a { 1.0 / (b - a) } else { 0.0 }
 }
 
-// CDF Functions (Approximations)
+// CDF Implementations (Approx)
 fn normal_cdf(x: f64, mu: f64, sigma: f64) -> f64 {
     if sigma <= 0.0 { return if x >= mu { 1.0 } else { 0.0 }; }
     let z = (x - mu) / (sigma * 2.0_f64.sqrt());
     0.5 * (1.0 + erf_approx(z))
 }
 fn erf_approx(x: f64) -> f64 {
-    // Abramowitz & Stegun 7.1.26
     let a1 =  0.254829592;
     let a2 = -0.284496736;
     let a3 =  1.421413741;

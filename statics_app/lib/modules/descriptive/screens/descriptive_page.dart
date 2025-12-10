@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:ffi/ffi.dart';
 
 // Imports de lógica
-import '../services.dart';
-import '../models.dart';
+import '../../../core/ffi/native_service.dart';
+import '../models/descriptive_models.dart';
+
 // Imports de widgets 
 import '../widgets/histogram_painter.dart';
 import '../widgets/boxplot_widget.dart';

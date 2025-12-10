@@ -1,6 +1,6 @@
 // lib/widgets/boxplot_widget.dart
 import 'package:flutter/material.dart';
-import '../models.dart';
+import '../models/descriptive_models.dart';
 
 class BoxplotWidget extends StatelessWidget {
   final Boxplot box;

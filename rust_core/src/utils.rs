@@ -10,7 +10,7 @@ pub fn sturges_bins(n: usize) -> usize {
 
     // Redondear k al entero impar más cercano
     // Usamos round() para el redondeo estándar, no ceil()
-    let k = k_f64.round() as usize;
+    let k = k_f64 as usize;
 
     if k % 2 == 0 { k + 1 } else { k }
 }
