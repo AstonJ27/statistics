@@ -80,7 +80,7 @@ class _DescriptivePageState extends State<DescriptivePage> {
       try {
         NativeService.generateSamples(ptr, _n, dist: dist, param1: p1, param2: p2);
         // forcedK = 0 (Rust usa Sturges)
-        final res = await Future.delayed(Duration.zero, () => NativeService.analyzeDistribution(ptr, _n, hRound: true, forcedK: 0));
+        final res = await Future.delayed(Duration.zero, () => NativeService.analyzeDistribution(ptr, _n, hRound: true, forcedK: 0, forcedMin: double.nan, forcedMax: double.nan));
         setState(() => _result = res);
       } catch (e) {
         setState(() => _error = "Error: $e");
@@ -92,13 +92,26 @@ class _DescriptivePageState extends State<DescriptivePage> {
   }
 
   // Modificado para recibir 'k'
-  Future<void> _analyzeManualData(List<double> data, int k) async {
+  Future<void> _analyzeManualData(List<double> data, int k, double? min, double? max) async {
     setState(() { _running = true; _error = ''; _result = null; });
     try {
        final ptr = NativeService.copyDataToRust(data);
        try {
-         // Pasamos 'k' a Rust. Si es CSV, k vendrá 0 y Rust usará Sturges. Si es Tabla, k > 0 y Rust lo respeta.
-         final res = await Future.delayed(Duration.zero, () => NativeService.analyzeDistribution(ptr, data.length, hRound: true, forcedK: k));
+         // Convertir a NaN para que Rust sepa que "no hay dato" si es null
+         double fMin = min ?? double.nan;
+         double fMax = max ?? double.nan;
+         
+         final res = await Future.delayed(Duration.zero, () => 
+            // Llamamos a la nueva firma del servicio nativo
+            NativeService.analyzeDistribution(
+                ptr, 
+                data.length, 
+                hRound: true, 
+                forcedK: k,
+                forcedMin: fMin, // <--- NUEVO
+                forcedMax: fMax  // <--- NUEVO
+            )
+         );
          setState(() => _result = res);
        } finally {
          NativeService.freeDoublePtr(ptr);
