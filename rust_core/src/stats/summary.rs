@@ -12,6 +12,7 @@ pub struct SummaryStats {
     pub variance_sample: f64,
     pub std_pop: f64,
     pub std_sample: f64,
+    pub cv: f64,    // Nuevo campo
     pub median: f64,
     pub mode: Vec<f64>,
     pub skewness: f64,
@@ -27,10 +28,11 @@ pub struct SummaryStats {
 /// Esto evita reordenar múltiples veces en analysis.rs.
 pub fn calculate_summary_sorted(sorted_data: &[f64], nbins: usize) -> SummaryStats {
     let n = sorted_data.len();
+    
     if n == 0 {
         return SummaryStats {
             n: 0, mean: 0.0, variance_pop: 0.0, variance_sample: 0.0,
-            std_pop: 0.0, std_sample: 0.0, median: 0.0, mode: vec![],
+            std_pop: 0.0, std_sample: 0.0, cv: 0.0, median: 0.0, mode: vec![],
             skewness: 0.0, kurtosis_excess: 0.0, min: 0.0, max: 0.0, range: 0.0,
             k: nbins, amplitude: 0.0,
         };
@@ -63,6 +65,8 @@ pub fn calculate_summary_sorted(sorted_data: &[f64], nbins: usize) -> SummarySta
     let variance_sample = if n > 1 { m2 / ((n - 1) as f64) } else { 0.0 };
     let std_pop = variance_pop.sqrt();
     let std_sample = variance_sample.sqrt();
+
+    let cv = if mean.abs() < 1e-9 {0.0} else {(std_sample/mean) * 100.0};
 
     let skewness = if m2 == 0.0 { 0.0 } else { ((n as f64) * m3) / m2.powf(1.5) };
     let kurtosis_excess = if m2 == 0.0 { -3.0 } else { ((n as f64) * m4) / (m2 * m2) - 3.0 };
@@ -111,12 +115,12 @@ pub fn calculate_summary_sorted(sorted_data: &[f64], nbins: usize) -> SummarySta
         if current_streak == max_streak { modes.push(current_val); }
     }
     
-    // Tu corrección aplicada aquí:
+    
     modes.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
 
     SummaryStats {
-        n, mean, variance_pop, variance_sample, std_pop, std_sample, median,
-        mode: modes, skewness, kurtosis_excess, min, max, range,
+        n, mean, variance_pop, variance_sample, std_pop, std_sample, cv,
+        median, mode: modes, skewness, kurtosis_excess, min, max, range,
         k: safe_nbins, amplitude,
     }
 }

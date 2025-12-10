@@ -21,11 +21,18 @@ pub mod simulations {
 
 // 1. ANALYZE (Función Principal Unificada)
 #[no_mangle]
-pub extern "C" fn analyze_distribution_json(ptr: *const f64, len: usize, h_round: i32) -> *mut c_char {
+pub extern "C" fn analyze_distribution_json(
+    ptr: *const f64, 
+    len: usize, 
+    h_round: i32, 
+    forced_k: usize, 
+    forced_min: f64, // <-- Nuevo
+    forced_max: f64  // <-- Nuevo
+) -> *mut c_char {
     let hr = h_round != 0;
-    // Llama a analysis.rs que ahora contiene toda la lógica optimizada
-    match analysis::analyze_distribution_json(ptr, len, hr) {
-        Ok(p) => p as *mut c_char, // Cast seguro en caso de diferencias de alias
+    // Pasa los nuevos parámetros al módulo analysis
+    match analysis::analyze_distribution_json(ptr, len, hr, forced_k, forced_min, forced_max) {
+        Ok(p) => p as *mut c_char,
         Err(_) => std::ptr::null_mut(),
     }
 }

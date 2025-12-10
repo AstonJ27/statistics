@@ -134,19 +134,21 @@ class AnalyzeResult {
   final Map<String, dynamic>? bestFit;
   final Map<String, dynamic>? curves;
 
+  // Estadísticas descriptivas
   final int n;
   final double mean;
   final double std;       // Desviación Muestral
   final double variance;  // Varianza Muestral
+  final double cv;        // <--- NUEVO: Coeficiente de Variación
   final double median;
-  final List<double> mode; // Puede ser multimodal, por eso es lista
+  final List<double> mode; 
   final double skewness;
   final double kurtosis;
   final double min;
   final double max;
   final double range;
-  final int k;            // Número de clases
-  final double amplitude; // Amplitud (W)
+  final int k;            
+  final double amplitude; 
   
   AnalyzeResult({
     required this.histogram, 
@@ -159,6 +161,7 @@ class AnalyzeResult {
     required this.mean, 
     required this.std,
     required this.variance,
+    required this.cv, // <--- Requerido en constructor
     required this.median,
     required this.mode,
     required this.skewness,
@@ -170,35 +173,25 @@ class AnalyzeResult {
     required this.amplitude,
   });
   
-  
   factory AnalyzeResult.fromJson(Map<String, dynamic> j) {
     
-    double toD(dynamic v) => (v == null) ? 0.0 : (v as num).toDouble();
-    int toI(dynamic v) => (v == null) ? 0 : (v as num).toInt();
-
-    final hist = HistogramData.fromJson(j['histogram']);
-    final freq = FrequencyTable.fromJson(j['freq_table']);
-    final bp = Boxplot.fromJson(j['boxplot']);
-    final sl = (j['stem_leaf'] as List).map((e) => StemLeafItem.fromJson(e as Map<String, dynamic>)).toList();
-    final cur = j['curves'] != null ? Map<String,dynamic>.from(j['curves'] as Map) : null;
-    final bf = j['best_fit'] != null ? Map<String,dynamic>.from(j['best_fit'] as Map) : null;
-    
-    // si algo falla cambiar summary por s
+    // final summary = j['summary'] ?? {}; // Protección si summary viniera null (opcional)
     final summary = j['summary'] as Map<String,dynamic>;
     
     return AnalyzeResult(
-      histogram: hist,
-      freqTable: freq,
-      boxplot: bp,
-      stemLeaf: sl,
-      curves: cur,
-      bestFit: bf,
-      // Mapeo de los nuevos campos
+      histogram: HistogramData.fromJson(j['histogram']),
+      freqTable: FrequencyTable.fromJson(j['freq_table']),
+      boxplot: Boxplot.fromJson(j['boxplot']),
+      stemLeaf: (j['stem_leaf'] as List).map((e) => StemLeafItem.fromJson(e as Map<String, dynamic>)).toList(),
+      curves: j['curves'] != null ? Map<String,dynamic>.from(j['curves'] as Map) : null,
+      bestFit: j['best_fit'] != null ? Map<String,dynamic>.from(j['best_fit'] as Map) : null,
+      
+      // Mapeo de campos del summary
       n: (summary['n'] as num).toInt(),
       mean: (summary['mean'] as num).toDouble(),
-      // Nota: En Rust mandamos 'std_sample' y 'variance_sample'
       std: (summary['std_sample'] as num).toDouble(),
       variance: (summary['variance_sample'] as num).toDouble(),
+      cv: (summary['cv'] ?? 0.0).toDouble(), // <--- Mapeo del nuevo campo
       median: (summary['median'] as num).toDouble(),
       
       mode: (summary['mode'] as List?)?.map((e) => (e as num).toDouble()).toList() ?? [],

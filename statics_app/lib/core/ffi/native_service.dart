@@ -4,7 +4,6 @@ import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 import 'ffi_bindings.dart';
 
-// CORRECCIÓN: Importar el modelo desde su nueva ubicación en el módulo descriptivo
 import '../../modules/descriptive/models/descriptive_models.dart'; 
 
 class NativeService {
@@ -27,13 +26,28 @@ class NativeService {
     throw Exception('No native generator disponible (revisa libstat_core.so y nombres exportados).');
   }
 
-  /// Llama a analyze_distribution_json(ptr, n, h_round) y parsea resultados
-  static AnalyzeResult analyzeDistribution(Pointer<Double> ptr, int n, {bool hRound = true}) {
-    if (analyzeDistributionNative == null || freeCStringNative == null) {
-      throw Exception('El binding nativo para analyze_distribution_json o free_c_string no está disponible.');
+  /// Llama a analyze_distribution_json(ptr, n, h_round, forced_k) y parsea resultados
+  /// Ahora acepta [forcedK]. Si es 0 (por defecto), Rust calcula Sturges.
+  static AnalyzeResult analyzeDistribution(
+    Pointer<Double> ptr, 
+    int n, 
+    {
+      bool hRound = true, 
+      int forcedK = 0,
+      double forcedMin = double.nan,  // <-- Nuevo (valor por defecto NaN)
+      double forcedMax = double.nan   // <-- Nuevo
     }
+  ) {
+    
+    if (analyzeDistributionNative == null || freeCStringNative == null) {
+      throw Exception('Bindings no disponibles.');
+    }
+    
     final int hr = hRound ? 1 : 0;
-    final Pointer<Utf8> resPtr = analyzeDistributionNative!(ptr, n, hr);
+    
+    // Pasamos forcedK al nativo
+    final Pointer<Utf8> resPtr = analyzeDistributionNative!(ptr, n, hr, forcedK, forcedMin, forcedMax);
+    
     if (resPtr.address == 0) {
       throw Exception('analyze_distribution_json devolvió NULL');
     }
@@ -76,5 +90,19 @@ class NativeService {
     } finally {
       calloc.free(ptrName);
     }
+  }
+
+  /// Copia una lista de Dart a un puntero en el Heap nativo (para pasar a Rust)
+  static Pointer<Double> copyDataToRust(List<double> data) {
+    final ptr = calloc<Double>(data.length);
+    for (int i = 0; i < data.length; i++) {
+      ptr[i] = data[i];
+    }
+    return ptr;
+  }
+
+  /// Libera el puntero de datos (importante para evitar fugas de memoria)
+  static void freeDoublePtr(Pointer<Double> ptr) {
+    calloc.free(ptr);
   }
 }

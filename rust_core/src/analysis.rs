@@ -1,176 +1,109 @@
-// src/analysis.rs
+// rust_core/src/analysis.rs
 use serde_json::json;
 use crate::json_helpers::to_cstring;
 use crate::errors::Error;
 use std::slice;
 use std::f64::consts::PI;
 
-// Imports de módulos refactorizados
-use crate::stats::summary;
+// Imports de módulos
+use crate::stats::summary::{self, SummaryStats};
 use crate::aggregation::{histogram, boxplot, stem_leaf};
-// Para freq_table seguiremos usando lógica inline o llamarías a su fn si la refactorizas
 
-pub fn analyze_distribution_json(ptr: *const f64, len: usize, h_round: bool) -> Result<*mut libc::c_char, Error> {
-    if !crate::ffi::check_ptr_len(ptr, len) { return Err(Error::NullOrEmptyInput); }
+// Estructuras auxiliares para organizar el código interno
+struct FitResult {
+    name: &'static str,
+    aic: f64,
+    ll: f64,
+    params: Vec<f64>,
+}
+
+struct CurvesResult {
+    x_plot: Vec<f64>,
+    best_freq: Vec<f64>,
+    expected_counts: Vec<f64>,
+}
+
+// --- FUNCIÓN PRINCIPAL (ORQUESTADOR) ---
+pub fn analyze_distribution_json(
+    ptr: *const f64, 
+    len: usize, 
+    h_round: bool, 
+    forced_k: usize, 
+    forced_min: f64, 
+    forced_max: f64
+) -> Result<*mut libc::c_char, Error> {
     
     unsafe {
-        // 1. Preparar datos (ORDENAR UNA SOLA VEZ)
-        let mut data = slice::from_raw_parts(ptr, len).to_vec();
-        data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        
+        // 1. Obtener y ordenar datos (Función extraída)
+        let data = get_sorted_data(ptr, len)?;
         let n = data.len();
-        if n == 0 { return Err(Error::NullOrEmptyInput); }
         let n_f64 = n as f64;
 
-        // 2. Calcular K (Sturges)
-        let mut k = crate::utils::sturges_bins(n);
-        if h_round && k % 2 == 0 { k += 1; }
+        // 2. Determinar K
+        let k = if forced_k > 0 {
+            forced_k
+        } else {
+            let s_k = crate::utils::sturges_bins(n);
+            if h_round && s_k % 2 == 0 { s_k + 1 } else { s_k }
+        };
 
-        // 3. Obtener Summary Stats (Usando módulo optimizado)
-        let summary_stats = summary::calculate_summary_sorted(&data, k);
+        // 3. Estadísticas Descriptivas
+        let mut summary_stats = summary::calculate_summary_sorted(&data, k);
+        
+        // Aplicar límites manuales si existen (para corregir tablas manuales)
+        if !forced_min.is_nan() { summary_stats.min = forced_min; }
+        if !forced_max.is_nan() { summary_stats.max = forced_max; }
+        
+        // Recalcular rango y amplitud con los límites definitivos
+        summary_stats.range = summary_stats.max - summary_stats.min;
+        if k > 0 { summary_stats.amplitude = summary_stats.range / (k as f64); }
+        summary_stats.k = k;
+
+        // Variables limpias para uso posterior
         let minv = summary_stats.min;
         let maxv = summary_stats.max;
         let w = summary_stats.amplitude;
 
-        // 4. Boxplot (Usando módulo optimizado)
+        // 4. Módulos de Agregación (Boxplot, Hist, Stem)
         let box_stats = boxplot::calculate_boxplot_sorted(&data);
-
-        // 5. Histograma (Usando módulo optimizado)
         let hist_data = histogram::calculate_histogram_logic(&data, k, minv, maxv);
+        let stem_data = stem_leaf::calculate_stem_leaf_logic(&data, 100.0);
 
-        // 6. Stem & Leaf (Usando wrapper existente, asumiendo scale fijo o dinámico)
-        // Nota: stem_leaf_json original toma puntero, aquí usamos lógica interna si existiera,
-        // si no, replicamos la lógica brevemente para no crear punteros internos.
-        let scale = 100.0; 
-        let stem_data = stem_leaf::calculate_stem_leaf_logic(&data, scale);
-
-        // 7. Freq Table (Construimos basándonos en el histograma ya calculado)
-        // Esto evita recalcular bins. Reutilizamos `hist_data`.
+        // 5. Tabla de Frecuencias (Construida desde el Histograma para consistencia)
         let mut classes = Vec::with_capacity(k);
         let mut cum_abs = 0u32;
         let mut cum_rel = 0.0f64;
         
         for i in 0..k {
-            let abs_f = hist_data.counts[i];
+            let abs_f = if i < hist_data.counts.len() { hist_data.counts[i] } else { 0 };
             cum_abs += abs_f;
             let rel = (abs_f as f64) / n_f64;
             cum_rel += rel;
             
-            // Usamos edges del histograma para consistencia perfecta
+            // Usamos lógica de intervalos consistente con minv/maxv
+            let lower = minv + (i as f64) * w;
+            let upper = lower + w;
+            let midpoint = lower + (w / 2.0);
+
             classes.push(json!({
-                "lower": hist_data.edges[i],
-                "upper": hist_data.edges[i+1],
-                "midpoint": hist_data.centers[i],
-                "abs_freq": abs_f,
-                "rel_freq": rel,
-                "cum_abs": cum_abs,
-                "cum_rel": cum_rel
+                "lower": lower, "upper": upper, "midpoint": midpoint,
+                "abs_freq": abs_f, "rel_freq": rel,
+                "cum_abs": cum_abs, "cum_rel": cum_rel
             }));
         }
         let freq_table_json = json!({ "classes": classes, "amplitude": w });
 
+        // 6. Best Fit (Función extraída)
+        let fit = calculate_best_fit(&data, &summary_stats);
 
-        // 8. BEST FIT (Optimizado y Corregido)
-        let mean = summary_stats.mean;
-        let std = summary_stats.std_pop; // MLE usa población
-
-        // LL Normal
-        let ll_norm = ll_normal(&data, mean, std);
-        let aic_norm = 4.0 - 2.0 * ll_norm;
-
-        // LL Uniform
-        let ll_unif = ll_uniform(&data, minv, maxv);
-        let aic_unif = 4.0 - 2.0 * ll_unif;
-
-        // FIX: Validar negativos para Exp y LogNormal
-        let has_negatives = minv < 0.0;
-        
-        // Exponential
-        let (aic_exp, ll_exp, exp_params) = if has_negatives || mean <= 0.0 {
-            (f64::INFINITY, f64::NEG_INFINITY, vec![])
-        } else {
-            let beta = mean;
-            let ll = ll_exponential(&data, beta);
-            (2.0 - 2.0 * ll, ll, vec![beta])
+        // 7. Curvas y Esperados (Función extraída)
+        // Nota: Pasamos los bordes calculados o generamos unos ideales basados en minv/maxv
+        let edges = if !hist_data.edges.is_empty() { hist_data.edges.clone() } else { 
+            (0..=k).map(|i| minv + i as f64 * w).collect() 
         };
+        let curves = calculate_curves(&fit, &edges, minv, maxv, n_f64, w);
 
-        // LogNormal
-        let (aic_logn, ll_logn, logn_params) = if has_negatives || minv <= 0.0 {
-             (f64::INFINITY, f64::NEG_INFINITY, vec![])
-        } else {
-             let ln_data: Vec<f64> = data.iter().map(|x| x.ln()).collect();
-             let ln_mean: f64 = ln_data.iter().sum::<f64>() / n_f64;
-             let ln_var: f64 = ln_data.iter().map(|x| (x - ln_mean).powi(2)).sum::<f64>() / n_f64;
-             let ln_sigma = ln_var.sqrt();
-             let ll = ll_lognormal(&data, ln_mean, ln_sigma);
-             (4.0 - 2.0 * ll, ll, vec![ln_mean, ln_sigma])
-        };
-
-        // Selección del mejor
-        let mut fits = vec![
-            ("normal", aic_norm, ll_norm, json!({"params":[mean, std]})),
-            ("exponential", aic_exp, ll_exp, json!({"params": exp_params})),
-            ("lognormal", aic_logn, ll_logn, json!({"params": logn_params})),
-            ("uniform", aic_unif, ll_unif, json!({"params":[minv, maxv]})),
-        ];
-        // Ordenar por AIC menor
-        fits.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-        
-        let best = &fits[0];
-        let best_name = best.0;
-        let best_aic = best.1;
-        let best_ll = best.2;
-        let best_params = best.3.clone();
-
-        // 9. Generar Curvas (Expected Counts y Plot)
-        // ... (Lógica de curvas simplificada usando helpers abajo) ...
-        // Calculamos expected counts usando CDFs en los bordes del histograma
-        let mut expected_counts = vec![0.0; k];
-        let mut cdf_vals = Vec::with_capacity(k+1);
-        
-        // Helper closures para CDF dinámico
-        let cdf_func = |x: f64| -> f64 {
-            match best_name {
-                "normal" => normal_cdf(x, mean, std),
-                "exponential" => if !exp_params.is_empty() { exponential_cdf(x, exp_params[0]) } else { 0.0 },
-                "lognormal" => if !logn_params.is_empty() { lognormal_cdf(x, logn_params[0], logn_params[1]) } else { 0.0 },
-                "uniform" => uniform_cdf(x, minv, maxv),
-                _ => 0.0,
-            }
-        };
-        
-        // PDF function para plotting
-        let pdf_func = |x: f64| -> f64 {
-            match best_name {
-                "normal" => normal_pdf(x, mean, std),
-                "exponential" => if !exp_params.is_empty() { exponential_pdf(x, exp_params[0]) } else { 0.0 },
-                "lognormal" => if !logn_params.is_empty() { lognormal_pdf(x, logn_params[0], logn_params[1]) } else { 0.0 },
-                "uniform" => uniform_pdf(x, minv, maxv),
-                _ => 0.0,
-            }
-        };
-
-        for &edge in &hist_data.edges {
-            cdf_vals.push(cdf_func(edge));
-        }
-        for i in 0..k {
-            let p = (cdf_vals[i+1] - cdf_vals[i]).max(0.0);
-            expected_counts[i] = p * n_f64;
-        }
-
-        // Puntos para gráfica (Curva suave)
-        let mpoints = 100usize;
-        let mut x_plot = Vec::with_capacity(mpoints);
-        let mut best_freq = Vec::with_capacity(mpoints);
-        for i in 0..mpoints {
-            let t = (i as f64) / ((mpoints - 1) as f64);
-            let x = minv + t * (maxv - minv);
-            x_plot.push(x);
-            let pdf = pdf_func(x);
-            best_freq.push(pdf * n_f64 * w);
-        }
-
-        // 10. Salida Final
+        // 8. Construir JSON Final
         let out = json!({
             "summary": summary_stats,
             "histogram": hist_data,
@@ -178,15 +111,15 @@ pub fn analyze_distribution_json(ptr: *const f64, len: usize, h_round: bool) -> 
             "boxplot": box_stats,
             "stem_leaf": stem_data,
             "best_fit": {
-                "name": best_name,
-                "aic": best_aic,
-                "ll": best_ll,
-                "params": best_params,
-                "expected_counts": expected_counts
+                "name": fit.name,
+                "aic": fit.aic,
+                "ll": fit.ll,
+                "params": fit.params,
+                "expected_counts": curves.expected_counts
             },
             "curves": {
-                "x": x_plot,
-                "best_freq": best_freq
+                "x": curves.x_plot,
+                "best_freq": curves.best_freq
             }
         });
 
@@ -194,7 +127,123 @@ pub fn analyze_distribution_json(ptr: *const f64, len: usize, h_round: bool) -> 
     }
 }
 
-// --- HELPERS MATEMÁTICOS (Privados) ---
+// --- FUNCIONES DE SOPORTE (EXTRAÍDAS) ---
+
+unsafe fn get_sorted_data(ptr: *const f64, len: usize) -> Result<Vec<f64>, Error> {
+    if !crate::ffi::check_ptr_len(ptr, len) { return Err(Error::NullOrEmptyInput); }
+    let mut data = slice::from_raw_parts(ptr, len).to_vec();
+    data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(data)
+}
+
+fn calculate_best_fit(data: &[f64], stats: &SummaryStats) -> FitResult {
+    let mean = stats.mean;
+    let std = stats.std_pop;
+    let minv = stats.min;
+    let maxv = stats.max;
+    let n_f64 = data.len() as f64;
+
+    // 1. Normal
+    let ll_norm = ll_normal(data, mean, std);
+    let aic_norm = 4.0 - 2.0 * ll_norm;
+
+    // 2. Uniforme
+    let ll_unif = ll_uniform(data, minv, maxv);
+    let aic_unif = 4.0 - 2.0 * ll_unif;
+
+    // Validar negativos para Exp y LogNormal
+    let has_negatives = minv < 0.0;
+
+    // 3. Exponencial
+    let (aic_exp, ll_exp, exp_params) = if has_negatives || mean <= 0.0 {
+        (f64::INFINITY, f64::NEG_INFINITY, vec![])
+    } else {
+        let beta = mean;
+        let ll = ll_exponential(data, beta);
+        (2.0 - 2.0 * ll, ll, vec![beta])
+    };
+
+    // 4. LogNormal
+    let (aic_logn, ll_logn, logn_params) = if has_negatives || minv <= 0.0 {
+         (f64::INFINITY, f64::NEG_INFINITY, vec![])
+    } else {
+         let ln_data: Vec<f64> = data.iter().map(|x| x.ln()).collect();
+         let ln_mean: f64 = ln_data.iter().sum::<f64>() / n_f64;
+         let ln_var: f64 = ln_data.iter().map(|x| (x - ln_mean).powi(2)).sum::<f64>() / n_f64;
+         let ln_sigma = ln_var.sqrt();
+         let ll = ll_lognormal(data, ln_mean, ln_sigma);
+         (4.0 - 2.0 * ll, ll, vec![ln_mean, ln_sigma])
+    };
+
+    // Selección
+    let mut fits = vec![
+        FitResult { name: "normal", aic: aic_norm, ll: ll_norm, params: vec![mean, std] },
+        FitResult { name: "exponential", aic: aic_exp, ll: ll_exp, params: exp_params },
+        FitResult { name: "lognormal", aic: aic_logn, ll: ll_logn, params: logn_params },
+        FitResult { name: "uniform", aic: aic_unif, ll: ll_unif, params: vec![minv, maxv] },
+    ];
+
+    fits.sort_by(|a, b| a.aic.partial_cmp(&b.aic).unwrap_or(std::cmp::Ordering::Equal));
+    
+    // Retornar el mejor (remove(0) saca el primero)
+    fits.remove(0)
+}
+
+fn calculate_curves(fit: &FitResult, edges: &[f64], minv: f64, maxv: f64, n_f64: f64, w: f64) -> CurvesResult {
+    let params = &fit.params;
+    let name = fit.name;
+
+    // Helper closures
+    let cdf = |x: f64| -> f64 {
+        match name {
+            "normal" => normal_cdf(x, params[0], params[1]),
+            "exponential" => if !params.is_empty() { exponential_cdf(x, params[0]) } else { 0.0 },
+            "lognormal" => if !params.is_empty() { lognormal_cdf(x, params[0], params[1]) } else { 0.0 },
+            "uniform" => uniform_cdf(x, params[0], params[1]),
+            _ => 0.0,
+        }
+    };
+    
+    let pdf = |x: f64| -> f64 {
+        match name {
+            "normal" => normal_pdf(x, params[0], params[1]),
+            "exponential" => if !params.is_empty() { exponential_pdf(x, params[0]) } else { 0.0 },
+            "lognormal" => if !params.is_empty() { lognormal_pdf(x, params[0], params[1]) } else { 0.0 },
+            "uniform" => uniform_pdf(x, params[0], params[1]),
+            _ => 0.0,
+        }
+    };
+
+    // 1. Expected Counts (usando CDF en los bordes)
+    let mut expected_counts = Vec::with_capacity(edges.len().saturating_sub(1));
+    let mut cdf_vals = Vec::with_capacity(edges.len());
+    
+    for &edge in edges {
+        cdf_vals.push(cdf(edge));
+    }
+    
+    for i in 0..edges.len().saturating_sub(1) {
+        let p = (cdf_vals[i+1] - cdf_vals[i]).max(0.0);
+        expected_counts.push(p * n_f64);
+    }
+
+    // 2. Plotting Points (usando PDF)
+    let mpoints = 100usize;
+    let mut x_plot = Vec::with_capacity(mpoints);
+    let mut best_freq = Vec::with_capacity(mpoints);
+    
+    for i in 0..mpoints {
+        let t = (i as f64) / ((mpoints - 1) as f64);
+        let x = minv + t * (maxv - minv);
+        x_plot.push(x);
+        let y = pdf(x) * n_f64 * w;
+        best_freq.push(y);
+    }
+
+    CurvesResult { x_plot, best_freq, expected_counts }
+}
+
+// --- MATH HELPERS (Sin cambios, mantener igual) ---
 fn ll_normal(data: &[f64], mu: f64, sigma: f64) -> f64 {
     if sigma <= 0.0 { return f64::NEG_INFINITY; }
     let n = data.len() as f64;
@@ -231,7 +280,7 @@ fn ll_uniform(data: &[f64], a: f64, b: f64) -> f64 {
     -n * (b - a).ln()
 }
 
-// PDF Implementations
+// PDF Functions
 fn normal_pdf(x: f64, mu: f64, sigma: f64) -> f64 {
     if sigma <= 0.0 { return 0.0; }
     let z = (x - mu) / sigma;
@@ -249,12 +298,13 @@ fn uniform_pdf(x: f64, a: f64, b: f64) -> f64 {
     if x >= a && x <= b && b > a { 1.0 / (b - a) } else { 0.0 }
 }
 
-// CDF Implementations (Approx)
+// CDF Functions
 fn normal_cdf(x: f64, mu: f64, sigma: f64) -> f64 {
     if sigma <= 0.0 { return if x >= mu { 1.0 } else { 0.0 }; }
     let z = (x - mu) / (sigma * 2.0_f64.sqrt());
     0.5 * (1.0 + erf_approx(z))
 }
+
 fn erf_approx(x: f64) -> f64 {
     let a1 =  0.254829592;
     let a2 = -0.284496736;

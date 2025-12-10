@@ -12,9 +12,8 @@ typedef GenerateExpNative = Void Function(Pointer<Double>, IntPtr, Double, Uint6
 typedef GenerateExpDart = void Function(Pointer<Double>, int, double, int);
 
 // Native: Pointer<Utf8> analyze_distribution_json(Pointer<Double> ptr, IntPtr len, Int32 h_round)
-typedef AnalyzeNative = Pointer<Utf8> Function(Pointer<Double>, IntPtr, Int32);
-typedef AnalyzeDart = Pointer<Utf8> Function(Pointer<Double>, int, int);
-
+typedef AnalyzeNative = Pointer<Utf8> Function(Pointer<Double>, IntPtr, Int32, IntPtr, Double, Double); // Agregados dos Double
+typedef AnalyzeDart = Pointer<Utf8> Function(Pointer<Double>, int, int, int, double, double);           // Agregados dos double
 typedef FreeNative = Void Function(Pointer<Utf8>);
 typedef FreeDart = void Function(Pointer<Utf8>);
 
