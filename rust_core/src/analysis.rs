@@ -41,24 +41,8 @@ pub fn analyze_distribution_json(ptr: *const f64, len: usize, h_round: bool) -> 
         // 6. Stem & Leaf (Usando wrapper existente, asumiendo scale fijo o dinámico)
         // Nota: stem_leaf_json original toma puntero, aquí usamos lógica interna si existiera,
         // si no, replicamos la lógica brevemente para no crear punteros internos.
-        let stem_data = {
-            // Replicación breve de lógica para evitar FFI overhead interno
-            use std::collections::BTreeMap;
-            let scale = 100.0;
-            let mut map: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-            for &x in &data {
-                let scaled = (x * scale).round() as i64;
-                let stem = scaled / (scale as i64);
-                let leaf = (scaled % (scale as i64)).abs();
-                map.entry(stem).or_default().push(leaf);
-            }
-            let mut out = Vec::new();
-            for (stem, mut leaves) in map {
-                leaves.sort_unstable();
-                out.push(json!({"stem": stem, "leaves": leaves}));
-            }
-            out
-        };
+        let scale = 100.0; 
+        let stem_data = stem_leaf::calculate_stem_leaf_logic(&data, scale);
 
         // 7. Freq Table (Construimos basándonos en el histograma ya calculado)
         // Esto evita recalcular bins. Reutilizamos `hist_data`.

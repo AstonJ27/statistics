@@ -12,7 +12,7 @@ pub mod stats;
 pub mod probabilities;
 
 pub use crate::json_helpers::free_c_string;
-use std::ffi::{c_char, c_int, c_double};
+use std::ffi::{c_char};
 
 // nueva version ahora con simulacion
 pub mod simulations {
