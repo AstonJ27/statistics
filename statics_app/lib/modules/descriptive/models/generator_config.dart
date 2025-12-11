@@ -1,0 +1,1 @@
+enum Generator { normal, exponential, uniform }

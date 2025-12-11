@@ -129,7 +129,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             ),
             ListTile(
               leading: const Icon(Icons.bar_chart, color: Colors.white70),
-              title: const Text('Distribuciones', style: TextStyle(color: Colors.white)),
+              title: const Text('Analisis Exploratorio de Datos', style: TextStyle(color: Colors.white)),
               selected: _selectedIndex == 0,
               selectedTileColor: const Color(PRIMARY).withOpacity(0.2),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

@@ -1,3 +1,4 @@
+// lib/modules/descriptive/widgets/data_input_forms.dart
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 
@@ -10,14 +11,22 @@ typedef OnDataReady = void Function(List<double> data, int k, double? min, doubl
 class DataInputForms extends StatefulWidget {
   final InputMode mode;
   final OnDataReady onDataReady;
+  
+  // --- NUEVO: Datos iniciales para restaurar ---
+  final Map<String, dynamic>? initialData;
 
-  const DataInputForms({super.key, required this.mode, required this.onDataReady});
+  const DataInputForms({
+    super.key, 
+    required this.mode, 
+    required this.onDataReady,
+    this.initialData,
+  });
 
   @override
-  State<DataInputForms> createState() => _DataInputFormsState();
+  State<DataInputForms> createState() => DataInputFormsState(); // Hacemos pública la clase State removiendo el guion bajo si fuera necesario, pero con GlobalKey funciona así.
 }
 
-class _DataInputFormsState extends State<DataInputForms> {
+class DataInputFormsState extends State<DataInputForms> { // Renombrado a público para usar GlobalKey
   // --- CONTROLADORES CSV ---
   final TextEditingController _csvCtrl = TextEditingController();
 
@@ -25,15 +34,84 @@ class _DataInputFormsState extends State<DataInputForms> {
   List<Map<String, TextEditingController>> _tableRows = [];
   bool _isRelativeFreq = false;
   
-  // Controladores Globales (Configuración Rápida)
+  // Controladores Globales
   final TextEditingController _totalNCtrl = TextEditingController();
-  final TextEditingController _startValCtrl = TextEditingController(); // Nuevo: Límite Inicial
-  final TextEditingController _amplitudeCtrl = TextEditingController(); // Nuevo: Amplitud Constante
+  final TextEditingController _startValCtrl = TextEditingController();
+  final TextEditingController _amplitudeCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _addTableRow();
+    // LÓGICA DE RESTAURACIÓN
+    if (widget.initialData != null && widget.initialData!.isNotEmpty) {
+      _restoreFromData();
+    } else {
+      _addTableRow();
+    }
+  }
+
+  // Detecta si cambiamos de modo pero teníamos datos iniciales viejos, limpia si es necesario
+  @override
+  void didUpdateWidget(covariant DataInputForms oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialData != oldWidget.initialData) {
+       if (widget.initialData != null) {
+         _restoreFromData();
+       }
+    }
+  }
+
+  void _restoreFromData() {
+    final d = widget.initialData!;
+    
+    // Restaurar CSV
+    if (widget.mode == InputMode.csv && d.containsKey('csv_text')) {
+       _csvCtrl.text = d['csv_text'] ?? '';
+    }
+    
+    // Restaurar Tabla / Histograma
+    if ((widget.mode == InputMode.frequencyTable || widget.mode == InputMode.histogram) && d.containsKey('rows')) {
+        setState(() {
+          _tableRows.clear();
+          _isRelativeFreq = d['is_rel'] ?? false;
+          _totalNCtrl.text = d['total_n']?.toString() ?? '';
+          
+          final rows = d['rows'] as List;
+          for (var r in rows) {
+             _tableRows.add({
+                "lower": TextEditingController(text: r['lower']?.toString() ?? ''),
+                "upper": TextEditingController(text: r['upper']?.toString() ?? ''),
+                "midpoint": TextEditingController(text: r['midpoint']?.toString() ?? ''),
+                "freq": TextEditingController(text: r['freq']?.toString() ?? ''),
+             });
+          }
+        });
+    }
+
+    if (_tableRows.isEmpty && widget.mode != InputMode.csv) {
+        _addTableRow();
+    }
+  }
+
+  /// --- NUEVO MÉTODO PÚBLICO: Obtener estado actual para guardar ---
+  Map<String, dynamic> getCurrentInputState() {
+     if (widget.mode == InputMode.csv) {
+         return {'csv_text': _csvCtrl.text};
+     }
+     
+     // Mapear filas a JSON simple
+     List<Map<String, dynamic>> rowsJson = _tableRows.map((row) => {
+        'lower': row['lower']?.text,
+        'upper': row['upper']?.text,
+        'midpoint': row['midpoint']?.text,
+        'freq': row['freq']?.text,
+     }).toList();
+
+     return {
+         'rows': rowsJson,
+         'total_n': _totalNCtrl.text,
+         'is_rel': _isRelativeFreq
+     };
   }
 
   void _addTableRow() {
@@ -53,7 +131,7 @@ class _DataInputFormsState extends State<DataInputForms> {
     }
   }
 
-  // Lógica CSV (Igual)
+  // Lógica CSV
   void _processCsv() {
     try {
       final text = _csvCtrl.text.replaceAll(RegExp(r'[\n\r]'), ','); 
@@ -66,30 +144,26 @@ class _DataInputFormsState extends State<DataInputForms> {
         }
       }
       if (data.isEmpty) throw Exception("No se encontraron datos válidos");
-      // k=0 para Sturges, min/max null para auto-detectar
       widget.onDataReady(data, 0, null, null); 
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error en CSV: $e"), backgroundColor: Colors.red));
     }
   }
 
-  // --- LÓGICA PRINCIPAL HÍBRIDA ---
+  // Lógica Tabla
   void _processAggregatedData() {
     try {
       List<double> expandedData = [];
       double totalN = double.tryParse(_totalNCtrl.text) ?? 100.0;
       int validRows = 0;
       
-      // Variables para los límites reales detectados o calculados
       double? detectedMin;
       double? detectedMax;
 
-      // 1. Revisar si hay Configuración Rápida (Amplitud)
       double? globalStart = double.tryParse(_startValCtrl.text);
       double? globalAmp = double.tryParse(_amplitudeCtrl.text);
       bool useFastMode = (globalAmp != null && globalAmp > 0);
 
-      // Si usamos modo rápido para Tabla, necesitamos el inicio obligatoriamente
       if (useFastMode && widget.mode == InputMode.frequencyTable && globalStart == null) {
         throw Exception("Para usar la Amplitud automática en Tabla, ingrese el Límite Inicial.");
       }
@@ -97,55 +171,42 @@ class _DataInputFormsState extends State<DataInputForms> {
       for (int i = 0; i < _tableRows.length; i++) {
         var row = _tableRows[i];
         String freqTxt = row["freq"]!.text;
-        if (freqTxt.isEmpty) continue; // Saltar filas vacías
+        if (freqTxt.isEmpty) continue; 
 
         double freqVal = double.parse(freqTxt);
-        double point; // Marca de clase (xi)
-        
-        // --- CÁLCULO DE INTERVALOS Y MARCA ---
+        double point; 
         
         if (useFastMode) {
-          // === MODO RÁPIDO (Automático) ===
           if (widget.mode == InputMode.frequencyTable) {
-            // Tabla: Calculamos límites secuenciales
-            // LimInf = Start + (i * W)
             double rowMin = globalStart! + (validRows * globalAmp);
             double rowMax = rowMin + globalAmp;
-            point = (rowMin + rowMax) / 2; // Marca calculada matemáticamente
+            point = (rowMin + rowMax) / 2;
 
-            // Capturar límites globales
             if (validRows == 0) detectedMin = rowMin;
-            detectedMax = rowMax; // Se actualiza en cada iteración, quedando el último
+            detectedMax = rowMax;
             
           } else {
-            // Histograma: Tenemos Marca, calculamos Límites con Amplitud
             String midTxt = row["midpoint"]!.text;
             if (midTxt.isEmpty) throw Exception("Fila ${i+1}: Ingrese la Marca para el Histograma.");
             point = double.parse(midTxt);
             
-            // Inferencia exacta gracias a la amplitud dada
             double rowMin = point - (globalAmp / 2);
             double rowMax = point + (globalAmp / 2);
-            
-            // Capturar límites globales
-            detectedMin ??= rowMin; // Solo el primero
-            detectedMax = rowMax;   // Actualizar siempre
+            detectedMin ??= rowMin;
+            detectedMax = rowMax;
           }
 
         } else {
-          // === MODO MANUAL (Límite por Límite) ===
           String lowerTxt = row["lower"]!.text;
           String upperTxt = row["upper"]!.text;
           String midTxt = row["midpoint"]!.text;
 
-          // Intentar capturar límites manuales
           double? rowMin = lowerTxt.isNotEmpty ? double.tryParse(lowerTxt) : null;
           double? rowMax = upperTxt.isNotEmpty ? double.tryParse(upperTxt) : null;
 
           if (validRows == 0 && rowMin != null) detectedMin = rowMin;
           if (rowMax != null) detectedMax = rowMax;
 
-          // Determinar Marca
           if (midTxt.isNotEmpty) {
             point = double.parse(midTxt);
           } else if (rowMin != null && rowMax != null) {
@@ -155,7 +216,6 @@ class _DataInputFormsState extends State<DataInputForms> {
           }
         }
 
-        // --- EXPANSIÓN DE DATOS ---
         int count = _isRelativeFreq ? (freqVal * totalN).round() : freqVal.round();
         for (int k = 0; k < count; k++) {
           expandedData.add(point);
@@ -165,8 +225,6 @@ class _DataInputFormsState extends State<DataInputForms> {
       }
 
       if (expandedData.isEmpty) throw Exception("Datos insuficientes");
-      
-      // Enviamos a Rust los datos expandidos, k, y los límites exactos calculados/leídos
       widget.onDataReady(expandedData, validRows, detectedMin, detectedMax);
 
     } catch (e) {
@@ -177,7 +235,6 @@ class _DataInputFormsState extends State<DataInputForms> {
   @override
   Widget build(BuildContext context) {
     if (widget.mode == InputMode.csv) return _buildCsvForm();
-    // Reutilizamos el mismo form para Tabla e Histograma
     if (widget.mode == InputMode.frequencyTable) return _buildTableForm(isHistogram: false);
     if (widget.mode == InputMode.histogram) return _buildTableForm(isHistogram: true);
     return const SizedBox.shrink();
@@ -210,7 +267,6 @@ class _DataInputFormsState extends State<DataInputForms> {
   Widget _buildTableForm({required bool isHistogram}) {
     return Column(
       children: [
-        // 1. CONFIGURACIÓN GLOBAL (Tipo, N, Amplitud)
         Row(
           children: [
             const Text("Tipo:", style: TextStyle(color: Colors.white70)),
@@ -238,7 +294,6 @@ class _DataInputFormsState extends State<DataInputForms> {
         
         const SizedBox(height: 8),
         
-        // 2. CONFIGURACIÓN RÁPIDA (Amplitud e Inicio)
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(8)),
@@ -249,7 +304,6 @@ class _DataInputFormsState extends State<DataInputForms> {
               const SizedBox(height: 5),
               Row(
                 children: [
-                  // Para histograma el inicio no es critico globalmente (se usa marca), para tabla sí.
                   if (!isHistogram)
                     Expanded(child: _miniInput(_startValCtrl, hint: "Lim. Inicial (1ro)", isHeader: true)),
                   if (!isHistogram) const SizedBox(width: 8),
@@ -263,14 +317,11 @@ class _DataInputFormsState extends State<DataInputForms> {
 
         const SizedBox(height: 10),
 
-        // 3. ENCABEZADOS DE COLUMNAS
         Row(
           children: [
             const SizedBox(width: 30, child: Text("#", style: TextStyle(color: Colors.white54, fontSize: 11), textAlign: TextAlign.center)),
             const SizedBox(width: 5),
             
-            // Si es Histograma, NO mostramos inputs de limites (se infieren o no se usan)
-            // Si es Tabla, SÍ mostramos limites manuales
             if (!isHistogram) ...[
               const Expanded(child: Text("Inf", textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold))),
               const SizedBox(width: 5),
@@ -287,7 +338,6 @@ class _DataInputFormsState extends State<DataInputForms> {
         
         const Divider(color: Colors.white24, height: 10),
 
-        // 4. FILAS DINÁMICAS
         ..._tableRows.asMap().entries.map((entry) {
           int idx = entry.key;
           var row = entry.value;
@@ -328,7 +378,6 @@ class _DataInputFormsState extends State<DataInputForms> {
 
         const SizedBox(height: 10),
 
-        // 5. BOTONES
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [

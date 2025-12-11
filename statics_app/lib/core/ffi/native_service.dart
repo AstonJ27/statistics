@@ -27,18 +27,34 @@ class NativeService {
   }
 
   /// Llama a analyze_distribution_json(ptr, n, h_round, forced_k) y parsea resultados
-  /// Ahora acepta [forcedK]. Si es 0 (por defecto), Rust calcula Sturges.
   static AnalyzeResult analyzeDistribution(
     Pointer<Double> ptr, 
     int n, 
     {
       bool hRound = true, 
       int forcedK = 0,
-      double forcedMin = double.nan,  // <-- Nuevo (valor por defecto NaN)
-      double forcedMax = double.nan   // <-- Nuevo
+      double forcedMin = double.nan,
+      double forcedMax = double.nan
     }
   ) {
-    
+    // Reutilizamos el método Raw para no duplicar lógica
+    final jsonStr = analyzeDistributionRaw(ptr, n, hRound: hRound, forcedK: forcedK, forcedMin: forcedMin, forcedMax: forcedMax);
+    final Map<String, dynamic> j = jsonDecode(jsonStr);
+    return AnalyzeResult.fromJson(j);
+  }
+
+  /// NUEVO MÉTODO: Obtiene el JSON crudo (String) desde Rust.
+  /// Útil para guardar el resultado en base de datos sin serializar/deserializar objetos.
+  static String analyzeDistributionRaw(
+    Pointer<Double> ptr, 
+    int n, 
+    {
+      bool hRound = true, 
+      int forcedK = 0,
+      double forcedMin = double.nan,
+      double forcedMax = double.nan
+    }
+  ) {
     if (analyzeDistributionNative == null || freeCStringNative == null) {
       throw Exception('Bindings no disponibles.');
     }
@@ -51,10 +67,10 @@ class NativeService {
     if (resPtr.address == 0) {
       throw Exception('analyze_distribution_json devolvió NULL');
     }
+    
     final jsonStr = resPtr.toDartString();
     freeCStringNative!(resPtr);
-    final Map<String, dynamic> j = jsonDecode(jsonStr);
-    return AnalyzeResult.fromJson(j);
+    return jsonStr;
   }
 
   // --- Simulacion --
