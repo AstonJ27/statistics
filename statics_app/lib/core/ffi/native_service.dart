@@ -74,17 +74,40 @@ class NativeService {
   }
 
   // --- Simulacion --
-  static String simulateCarwash(int hours, double lambda) {
-    if (simulateCarwashNative == null || freeCStringNative == null) {
-      throw Exception('Binding simulate_carwash_json no encontrado');
+  /// Ejecuta la simulación dinámica (Multietapa + Concurrencia)
+  /// Recibe un Map (configuración) -> Serializa a JSON -> Envía a Rust -> Retorna JSON String
+  static Future<String> simulateCarwashDynamic(Map<String, dynamic> config) async {
+    // Verificamos que el binding exista (definido en ffi_bindings.dart)
+    if (simulateDynamicNative == null || freeCStringNative == null) {
+      throw Exception('Binding simulate_carwash_dynamic no encontrado en ffi_bindings.dart');
     }
-
-    final ptr = simulateCarwashNative!(hours, lambda);
-    if (ptr.address == 0) return "{}";
-
-    final jsonStr = ptr.toDartString();
-    freeCStringNative!(ptr);
-    return jsonStr;
+    
+    // 1. Serializar el mapa a JSON string
+    final jsonString = jsonEncode(config);
+    
+    // 2. Convertir String Dart -> Puntero C (UTF-8)
+    final ptrName = jsonString.toNativeUtf8();
+    
+    try {
+      // 3. Llamar a Rust
+      // simulateDynamicNative debe estar mapeado a "simulate_carwash_dynamic"
+      final ptr = simulateDynamicNative!(ptrName);
+      
+      if (ptr.address == 0) {
+        return "{\"error\": \"Error interno en Rust: Puntero nulo retornado\"}";
+      }
+      
+      // 4. Convertir Puntero C -> String Dart
+      final resJson = ptr.toDartString();
+      
+      // 5. Liberar memoria del string retornado por Rust
+      freeCStringNative!(ptr);
+      
+      return resJson;
+    } finally {
+      // 6. Liberar memoria del input (jsonString) que creamos con malloc
+      calloc.free(ptrName);
+    }
   }
 
   static String runSimulationDynamic(Map<String, dynamic> config) {

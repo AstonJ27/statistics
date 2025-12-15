@@ -1,89 +1,114 @@
 import 'package:flutter/material.dart';
-import '../../../core/theme/app_colors.dart';
-import '../models/simulation_models.dart'; 
+import '../models/simulation_models.dart';
+import '../../../core/theme/app_colors.dart'; // Asegúrate de la ruta correcta
 
 class StageInputList extends StatelessWidget {
   final List<StageInput> stages;
   final Function(int) onRemove;
   final VoidCallback onAdd;
-  final Function(StageInput, Generator) onTypeChanged; // Callback para actualizar el tipo
+  // Callback para notificar cambios y reconstruir la UI (importante para actualizar los labels)
+  final Function(StageInput, Generator)? onTypeChanged; 
 
   const StageInputList({
-    super.key,
-    required this.stages,
+    super.key, 
+    required this.stages, 
     required this.onRemove,
     required this.onAdd,
-    required this.onTypeChanged,
+    this.onTypeChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Text("Estaciones del Autolavado", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold))
-        ),
-        const SizedBox(height: 5),
-        
         ...stages.asMap().entries.map((entry) {
           int idx = entry.key;
           StageInput stage = entry.value;
-          
+
+          // Lógica para etiquetas dinámicas
+          String labelP1 = "Parámetro 1";
+          String labelP2 = "Parámetro 2";
+          bool showP2 = true;
+
+          switch (stage.type) {
+            case Generator.normal:
+              labelP1 = "Media (μ)";
+              labelP2 = "Desviación (σ)";
+              break;
+            case Generator.exponential:
+              // Aquí cumplimos tu requerimiento: Beta es el parámetro principal
+              labelP1 = "Beta"; 
+              showP2 = false; // La exponencial solo necesita 1 parámetro
+              break;
+            case Generator.uniform:
+              labelP1 = "Mínimo (a)";
+              labelP2 = "Máximo (b)";
+              break;
+          }
+
           return Card(
-            margin: const EdgeInsets.only(bottom: 8),
+            margin: const EdgeInsets.only(bottom: 12),
             color: AppColors.bgCard,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(12.0),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      CircleAvatar(
-                        backgroundColor: AppColors.primary, 
-                        radius: 12, 
-                        child: Text("${idx+1}", style: const TextStyle(fontSize: 12, color: Colors.white))
+                      Text("Estación ${idx + 1}: ${stage.name}", 
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)
                       ),
-                      const SizedBox(width: 10),
-                      // Dropdown
-                      Expanded(
-                        child: DropdownButton<Generator>(
-                          value: stage.type,
-                          dropdownColor: AppColors.bgCard,
-                          isDense: true,
-                          style: const TextStyle(color: Colors.white),
-                          underline: Container(),
-                          items: const [
-                            DropdownMenuItem(value: Generator.normal, child: Text("Normal")),
-                            DropdownMenuItem(value: Generator.exponential, child: Text("Exponencial")),
-                            DropdownMenuItem(value: Generator.uniform, child: Text("Uniforme")),
-                          ],
-                          onChanged: (g) {
-                            if (g != null) onTypeChanged(stage, g);
-                          },
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
-                        onPressed: () => onRemove(idx),
-                      )
+                      if (stages.length > 1)
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.redAccent), 
+                          onPressed: () => onRemove(idx)
+                        )
                     ],
                   ),
                   const SizedBox(height: 8),
-                  // Inputs
+                  
+                  // Selector de Distribución
+                  DropdownButtonFormField<Generator>(
+                    value: stage.type,
+                    dropdownColor: AppColors.bgPrimary,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: "Distribución",
+                      labelStyle: const TextStyle(color: Colors.white70),
+                      filled: true,
+                      fillColor: Colors.black12,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                    items: Generator.values.map((g) => DropdownMenuItem(
+                      value: g, 
+                      child: Text(g.toString().split('.').last.toUpperCase())
+                    )).toList(),
+                    onChanged: (v) {
+                      if (v != null) {
+                        stage.type = v;
+                        // Forzamos la reconstrucción si el padre pasa el callback, 
+                        // o confiamos en que el setState del padre reconstruya este widget.
+                        if (onTypeChanged != null) onTypeChanged!(stage, v);
+                      }
+                    }, 
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Inputs Dinámicos
                   Row(
                     children: [
-                      if (stage.type == Generator.normal) ...[
-                        Expanded(child: _buildInput(stage.p1Ctrl, "Media (μ)")),
-                        const SizedBox(width: 10),
-                        Expanded(child: _buildInput(stage.p2Ctrl, "Varianza (σ²)")),
-                      ] else if (stage.type == Generator.exponential) ...[
-                        Expanded(child: _buildInput(stage.p1Ctrl, "Beta (β)")),
-                      ] else ...[
-                        Expanded(child: _buildInput(stage.p1Ctrl, "Mínimo")),
-                        const SizedBox(width: 10),
-                        Expanded(child: _buildInput(stage.p2Ctrl, "Máximo")),
-                      ]
+                      Expanded(child: _buildInput(stage.p1Ctrl, labelP1)),
+                      const SizedBox(width: 8),
+                      // Ocultamos visualmente el segundo input si es exponencial
+                      if (showP2) ...[
+                        Expanded(child: _buildInput(stage.p2Ctrl, labelP2)),
+                        const SizedBox(width: 8),
+                      ],
+                      Expanded(child: _buildInput(stage.capacityCtrl, "Capacidad")),
                     ],
                   )
                 ],
@@ -91,13 +116,21 @@ class StageInputList extends StatelessWidget {
             ),
           );
         }).toList(),
-
-        ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.white10, foregroundColor: Colors.white),
-          onPressed: onAdd,
-          icon: const Icon(Icons.add),
-          label: const Text("Agregar Estación"),
-        ),
+        
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add),
+            label: const Text("AGREGAR NUEVA ESTACIÓN"),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.green,
+              side: const BorderSide(color: AppColors.green),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        )
       ],
     );
   }
@@ -106,14 +139,15 @@ class StageInputList extends StatelessWidget {
     return TextField(
       controller: ctrl,
       style: const TextStyle(color: Colors.white, fontSize: 13),
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
       decoration: InputDecoration(
         labelText: label,
+        labelStyle: const TextStyle(color: Colors.white70, fontSize: 12),
+        isDense: true,
         filled: true,
         fillColor: Colors.black12,
-        isDense: true,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
       ),
+      keyboardType: TextInputType.number,
     );
   }
 }
