@@ -2,10 +2,10 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart'; // <--- IMPORTANTE: Necesario para usar 'compute'
 import 'ffi_bindings.dart';
 
-import '../../modules/descriptive/models/descriptive_models.dart'; 
-
+import '../../modules/descriptive/models/descriptive_models.dart';
 class NativeService {
   /// Genera N muestras en la librería nativa
   /// dist: 'normal' | 'exponential' | 'uniform'
@@ -140,8 +140,43 @@ class NativeService {
     return ptr;
   }
 
+// Agrega esto dentro de la clase NativeService
+  static Future<String> runMonteCarlo(Map<String, dynamic> config) async {
+    final jsonString = jsonEncode(config);
+    // Usamos compute como en los otros métodos
+    return await compute(_runMonteCarloIsolate, jsonString);
+  }
+
   /// Libera el puntero de datos (importante para evitar fugas de memoria)
   static void freeDoublePtr(Pointer<Double> ptr) {
+    calloc.free(ptr);
+  }
+}
+
+// Debe estar fuera de la clase NativeService para que 'compute' la pueda llamar
+String _runMonteCarloIsolate(String jsonConfig) {
+  // 1. Convertir String Dart -> Puntero C
+  final ptr = jsonConfig.toNativeUtf8();
+  
+  try {
+    // 2. Llamar a la función nativa (Importada directamente de ffi_bindings.dart)
+    if (simulateMonteCarloNative == null) {
+      return jsonEncode({"error": "Función nativa simulation_montecarlo no encontrada"});
+    }
+    
+    final resultPtr = simulateMonteCarloNative!(ptr);
+    
+    // 3. Convertir Puntero C -> String Dart
+    final resultJson = resultPtr.toDartString();
+    
+    // 4. Liberar memoria del resultado en Rust
+    if (freeCStringNative != null) {
+      freeCStringNative!(resultPtr);
+    }
+    
+    return resultJson;
+  } finally {
+    // 5. Liberar memoria del input
     calloc.free(ptr);
   }
 }

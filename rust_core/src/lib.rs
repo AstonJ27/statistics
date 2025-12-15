@@ -17,6 +17,7 @@ use std::ffi::{c_char};
 // nueva version ahora con simulacion
 pub mod simulations {
     pub mod carwash;
+    pub mod montecarlo;
 }
 
 // 1. ANALYZE (Función Principal Unificada)
@@ -138,4 +139,10 @@ pub extern "C" fn simulate_carwash_dynamic(json_config: *const c_char) -> *mut c
         Ok(ptr) => ptr,
         Err(_) => std::ptr::null_mut(),
     }
+}
+
+#[no_mangle]
+pub extern "C" fn simulation_montecarlo(json_config: *const libc::c_char) -> *mut libc::c_char {
+    // Delegamos al módulo. El módulo ya retorna *mut c_char seguro usando to_cstring.
+    simulations::montecarlo::run_montecarlo(json_config)
 }

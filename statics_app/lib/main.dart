@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 
-// Importamos las pantallas separadas
-// Asegúrate de crear la carpeta 'scaffolds' y poner los archivos ahí
-//import 'scaffolds/descriptive.dart';
-//import 'scaffolds/simulation.dart';
 import 'modules/descriptive/screens/descriptive_page.dart';
 import 'modules/simulation/screens/simulation_page.dart';
+import 'modules/montecarlo/screens/montecarlo_page.dart'; 
+
 // --- PALETA DE COLORES (Global) ---
 const int PRIMARY = 0xFF4E2ECF;       // #4E2ECF (Morado Principal)
 const int BG_PRIMARY = 0xFF1D1D42;    // #1D1D42 (Fondo Oscuro)
@@ -82,11 +80,14 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   final List<Widget> _pages = [
     const DescriptivePage(), // Desde descriptive.dart
     const SimulationPage(),  // Desde simulation.dart
+    const MonteCarloPage(),
+
   ];
 
   final List<String> _titles = [
     'Análisis Descriptivo',
-    'Simulación Montecarlo (Colas)'
+    'Simulación (Colas)',
+    'Laboratorio Montecarlo'
   ];
 
   void _onItemTapped(int index) {
@@ -142,6 +143,14 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
               selectedTileColor: const Color(PRIMARY).withOpacity(0.2),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               onTap: () => _onItemTapped(1),
+            ),
+            ListTile(
+              leading: const Icon(Icons.casino, color: Colors.white70), // Icono de dado/azar
+              title: const Text('Laboratorio Montecarlo', style: TextStyle(color: Colors.white)),
+              selected: _selectedIndex == 2, // <--- Índice 2
+              selectedTileColor: const Color(PRIMARY).withOpacity(0.2),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              onTap: () => _onItemTapped(2), // <--- Índice 2
             ),
           ],
         ),

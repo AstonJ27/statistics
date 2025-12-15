@@ -92,3 +92,24 @@ SimDynamicDart? _lookupSimDynamic() {
   }
 }
 final SimDynamicDart? simulateDynamicNative = _lookupSimDynamic();
+
+// --- Montecarlo Module ---
+
+// 1. Definición de la firma Nativa (C/Rust)
+typedef SimMonteCarloNative = Pointer<Utf8> Function(Pointer<Utf8>);
+
+// 2. Definición de la firma en Dart
+typedef SimMonteCarloDart = Pointer<Utf8> Function(Pointer<Utf8>);
+
+// 3. Función de búsqueda
+SimMonteCarloDart? _lookupSimMonteCarlo() {
+  try {
+    return nativeLib.lookupFunction<SimMonteCarloNative, SimMonteCarloDart>('simulation_montecarlo');
+  } catch (e) { // <--- CORREGIDO: Usamos 'e' en lugar de '_'
+    print("Error buscando simulation_montecarlo: $e");
+    return null;
+  }
+}
+
+// Variable global final
+final SimMonteCarloDart? simulateMonteCarloNative = _lookupSimMonteCarlo();
