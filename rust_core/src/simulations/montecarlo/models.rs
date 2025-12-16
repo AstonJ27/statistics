@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Clone)]
 pub enum DistType {
-    Normal { mean: f64, std: f64 },
+    Normal { mean: f64, variance: f64 },
     Exponential { beta: f64 }, // Beta = Media = 1/Lambda
     Uniform { min: f64, max: f64 },
 }

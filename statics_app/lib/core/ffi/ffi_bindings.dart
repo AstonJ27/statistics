@@ -113,3 +113,14 @@ SimMonteCarloDart? _lookupSimMonteCarlo() {
 
 // Variable global final
 final SimMonteCarloDart? simulateMonteCarloNative = _lookupSimMonteCarlo();
+
+// --- Calculadora Inversa ---
+typedef CalcInverseNative = Pointer<Utf8> Function(Pointer<Utf8>);
+typedef CalcInverseDart = Pointer<Utf8> Function(Pointer<Utf8>);
+
+CalcInverseDart? _lookupCalcInverse() {
+  try {
+    return nativeLib.lookupFunction<CalcInverseNative, CalcInverseDart>('calculate_inverse_cdf');
+  } catch (e) { return null; }
+}
+final CalcInverseDart? calculateInverseCdfNative = _lookupCalcInverse();

@@ -29,8 +29,9 @@ pub fn execute(config: MonteCarloConfig) -> Result<MonteCarloResponse, Error> {
     
     for v in &config.variables {
         let dist = match v.distribution {
-            DistType::Normal { mean, std } => {
-                if std < 0.0 { return Err(Error::Other(format!("Std Dev negativa en {}", v.name))); }
+            DistType::Normal { mean, variance } => {
+                if variance < 0.0 { return Err(Error::Other(format!("Std Dev negativa en {}", v.name))); }
+                let std = variance.sqrt();
                 FastDist::Norm(Normal::new(mean, std).unwrap(), v.multiplier)
             },
             DistType::Exponential { beta } => {

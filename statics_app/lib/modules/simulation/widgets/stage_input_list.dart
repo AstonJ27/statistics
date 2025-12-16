@@ -32,8 +32,8 @@ class StageInputList extends StatelessWidget {
 
           switch (stage.type) {
             case Generator.normal:
-              labelP1 = "Media (μ)";
-              labelP2 = "Desviación (σ)";
+              labelP1 = "μ";
+              labelP2 = "σ²";
               break;
             case Generator.exponential:
               // Aquí cumplimos tu requerimiento: Beta es el parámetro principal

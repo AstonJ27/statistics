@@ -140,11 +140,17 @@ class NativeService {
     return ptr;
   }
 
-// Agrega esto dentro de la clase NativeService
+  // Agrega esto dentro de la clase NativeService
   static Future<String> runMonteCarlo(Map<String, dynamic> config) async {
     final jsonString = jsonEncode(config);
     // Usamos compute como en los otros métodos
     return await compute(_runMonteCarloIsolate, jsonString);
+  }
+
+  // Dentro de la clase NativeService:
+  static Future<String> calculateInverseCdf(Map<String, dynamic> req) async {
+    final jsonStr = jsonEncode(req);
+    return await compute(_runInverseCdfIsolate, jsonStr);
   }
 
   /// Libera el puntero de datos (importante para evitar fugas de memoria)
@@ -177,6 +183,20 @@ String _runMonteCarloIsolate(String jsonConfig) {
     return resultJson;
   } finally {
     // 5. Liberar memoria del input
+    calloc.free(ptr);
+  }
+}
+
+// Fuera de la clase (Top Level), al final del archivo:
+String _runInverseCdfIsolate(String jsonConfig) {
+  final ptr = jsonConfig.toNativeUtf8();
+  try {
+    if (calculateInverseCdfNative == null) return jsonEncode({"error": "Binding calculate_inverse_cdf not found"});
+    final resPtr = calculateInverseCdfNative!(ptr);
+    final resJson = resPtr.toDartString();
+    if (freeCStringNative != null) freeCStringNative!(resPtr);
+    return resJson;
+  } finally {
     calloc.free(ptr);
   }
 }
