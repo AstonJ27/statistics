@@ -1,3 +1,4 @@
+//statics_app\lib\modules\montecarlo\widgets\inverse_cdf_dialog.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../core/ffi/native_service.dart';

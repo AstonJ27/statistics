@@ -146,3 +146,33 @@ pub extern "C" fn simulation_montecarlo(json_config: *const libc::c_char) -> *mu
     // Delegamos al módulo. El módulo ya retorna *mut c_char seguro usando to_cstring.
     simulations::montecarlo::run_montecarlo(json_config)
 }
+
+// ---------- CALCULADORA INVERSA (CDF) ----------
+#[no_mangle]
+pub extern "C" fn calculate_inverse_cdf(json_request: *const libc::c_char) -> *mut libc::c_char {
+    use std::ffi::CStr;
+    use probabilities::cdf_pdf::{InverseCdfRequest, calculate_inverse};
+    use crate::json_helpers::to_cstring;
+
+    if json_request.is_null() { 
+        return to_cstring(&serde_json::json!({"error": "Null pointer input"})); 
+    }
+
+    // Parsear input
+    let req_result: Result<InverseCdfRequest, _> = unsafe {
+        let c_str = CStr::from_ptr(json_request);
+        let str_slice = c_str.to_str().unwrap_or("{}");
+        serde_json::from_str(str_slice)
+    };
+
+    match req_result {
+        Ok(req) => {
+            // Ejecutar lógica
+            match calculate_inverse(req) {
+                Ok(res) => to_cstring(&res),
+                Err(e) => to_cstring(&serde_json::json!({"error": e}))
+            }
+        },
+        Err(e) => to_cstring(&serde_json::json!({"error": format!("JSON Parse Error: {}", e)}))
+    }
+}

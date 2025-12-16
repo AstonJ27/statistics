@@ -4,6 +4,8 @@ import 'modules/descriptive/screens/descriptive_page.dart';
 import 'modules/simulation/screens/simulation_page.dart';
 import 'modules/montecarlo/screens/montecarlo_page.dart'; 
 
+
+import 'modules/learn/screens/learn_page.dart'; // <--- IMPORTAR
 // --- PALETA DE COLORES (Global) ---
 const int PRIMARY = 0xFF4E2ECF;       // #4E2ECF (Morado Principal)
 const int BG_PRIMARY = 0xFF1D1D42;    // #1D1D42 (Fondo Oscuro)
@@ -81,13 +83,14 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     const DescriptivePage(), // Desde descriptive.dart
     const SimulationPage(),  // Desde simulation.dart
     const MonteCarloPage(),
-
+    const LearnPage(),
   ];
 
   final List<String> _titles = [
     'Análisis Descriptivo',
     'Simulación (Colas)',
-    'Laboratorio Montecarlo'
+    'Laboratorio Montecarlo',
+    'Aprende FGM'
   ];
 
   void _onItemTapped(int index) {
@@ -152,6 +155,16 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               onTap: () => _onItemTapped(2), // <--- Índice 2
             ),
+            ListTile(
+              leading: const Icon(Icons.menu_book, color: Colors.white70), // Icono de libro
+              title: const Text('Teoría: FGM', style: TextStyle(color: Colors.white)),
+              selected: _selectedIndex == 3, // <--- Índice 3
+              selectedTileColor: const Color(PRIMARY).withOpacity(0.2),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              onTap: () => _onItemTapped(3),
+            ),
+
+
           ],
         ),
       ),
